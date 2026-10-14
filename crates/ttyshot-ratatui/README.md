@@ -1,24 +1,28 @@
 # ttyshot-ratatui
 
-Convert a Ratatui `Buffer` into ttyshot's version-independent `Grid` for deterministic snapshots.
-The adapter preserves grapheme strings, one- and two-cell width roles, colors, underline colors,
-and all Ratatui modifiers.
+Render Ratatui `Buffer`s to ttyshot's version-independent `Grid`, PNG, or SVG in process. No PTY or terminal process is required. Text and JSON snapshot helpers remain available.
 
 ## Ratatui versions
 
-Ratatui 0.29 is enabled by default because it is the version used by ttyshot's first-party
-consumer. Ratatui 0.30 users should disable default features and select 0.30 explicitly:
+Ratatui 0.29 is enabled by default:
 
 ```toml
-# Ratatui 0.29 (default)
+[dependencies]
+ratatui = "0.29"
 ttyshot-ratatui = "0.1"
+```
 
-# Ratatui 0.30
+Select Ratatui 0.30 by disabling the default feature:
+
+```toml
+[dependencies]
+ratatui = "0.30"
 ttyshot-ratatui = { version = "0.1", default-features = false, features = ["ratatui-0-30"] }
 ```
 
-The `ratatui-0-29` and `ratatui-0-30` features may also be enabled together. The crate uses
-aliased dependencies, so `--all-features` supports both buffer types in the same build.
+The `ratatui-0-29` and `ratatui-0-30` features may be enabled together. The crate uses aliased dependencies, so `--all-features` accepts both buffer types in one build.
+
+## Grid, text, and JSON snapshots
 
 ```rust
 use ratatui::buffer::Buffer;
@@ -30,15 +34,67 @@ buffer.set_string(0, 0, "hello", ratatui::style::Style::default());
 let grid = ttyshot_ratatui::to_grid(&buffer)?;
 insta::assert_snapshot!(ttyshot_ratatui::snapshot_text(&buffer)?);
 insta::assert_snapshot!(ttyshot_ratatui::snapshot_json(&buffer)?);
+# let _ = grid;
 # Ok::<(), ttyshot_ratatui::AdapterError>(())
 ```
 
-The text helper keeps the full rectangular frame, including trailing spaces. The JSON helper uses
-ttyshot-core's stable, explicit grid model and pretty-prints fields in a deterministic order.
+The text helper keeps the full rectangular frame, including trailing spaces. The JSON helper pretty-prints ttyshot-core's explicit cell model in a stable field order, including symbols, width roles, colors, and attributes.
 
-Cells marked as skipped for Ratatui's terminal diff are rejected with `AdapterError::SkippedCell`.
-Those cells usually sit behind Sixel, iTerm, or Kitty graphics, and a `Buffer` alone does not contain
-the pixels needed to capture them losslessly.
+Cells marked as skipped for Ratatui's terminal diff are rejected with `AdapterError::SkippedCell`. Such cells can sit behind Sixel, iTerm, or Kitty graphics. A `Buffer` alone does not contain the missing pixels, so silently rendering text would not be lossless.
 
-This adapter intentionally stops at `Grid`. An in-process image helper will be added by stacking on
-the renderer work; this crate does not duplicate renderer code.
+## In-process PNG and SVG
+
+Use the general functions when the application needs full renderer control:
+
+```rust
+use ttyshot_ratatui::{FontMode, Padding, RenderOptions};
+# use ratatui::buffer::Buffer;
+# use ratatui::layout::Rect;
+# let buffer = Buffer::empty(Rect::new(0, 0, 5, 1));
+
+let options = RenderOptions {
+    scale: 2,
+    padding: Padding::all(12),
+    font_mode: FontMode::System,
+    ..RenderOptions::default()
+};
+let png: Vec<u8> = ttyshot_ratatui::render_png(&buffer, options.clone())?;
+let svg: String = ttyshot_ratatui::render_svg(&buffer, options)?;
+# let _ = (png, svg);
+# Ok::<(), ttyshot_ratatui::AdapterError>(())
+```
+
+`RenderOptions::default()` uses `FontMode::System`. It can discover installed CJK fallback fonts and is suitable for normal local images. The selected system font can differ by OS.
+
+Snapshot helpers instead default to `FontMode::Deterministic`. They use only the bundled font unless explicit fallback paths are added through `snapshot_render_options()`. This makes ASCII and ttyshot's procedural box, block, Braille, sextant, octant, and Powerline output byte-stable. A CJK symbol still occupies its explicit two-cell footprint, but its shape is not promised unless the snapshot pins a fallback font. Color emoji and platform-specific ZWJ composition are best-effort and should not be used in portable goldens.
+
+## insta-friendly image snapshots
+
+`insta` is not a runtime dependency. Pass returned values to its macros from your own dev-dependencies:
+
+```toml
+[dev-dependencies]
+insta = "1"
+```
+
+```rust
+# use ratatui::buffer::Buffer;
+# use ratatui::layout::Rect;
+# let buffer = Buffer::empty(Rect::new(0, 0, 5, 1));
+let png = ttyshot_ratatui::snapshot_png(&buffer)?;
+let svg = ttyshot_ratatui::snapshot_svg(&buffer)?;
+insta::assert_binary_snapshot!("dashboard.png", png);
+insta::assert_snapshot!("dashboard.svg", svg);
+# Ok::<(), ttyshot_ratatui::AdapterError>(())
+```
+
+Or atomically replace deterministic files at caller-supplied paths. The helpers create missing parent directories, sync a temporary file in the same directory, and then rename it over the destination, so a failed update does not truncate an accepted snapshot:
+
+```rust
+# use ratatui::buffer::Buffer;
+# use ratatui::layout::Rect;
+# let buffer = Buffer::empty(Rect::new(0, 0, 5, 1));
+ttyshot_ratatui::write_snapshot_png(&buffer, "tests/snapshots/dashboard.png")?;
+ttyshot_ratatui::write_snapshot_svg(&buffer, "tests/snapshots/dashboard.svg")?;
+# Ok::<(), ttyshot_ratatui::AdapterError>(())
+```
