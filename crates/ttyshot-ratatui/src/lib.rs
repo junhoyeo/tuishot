@@ -543,7 +543,8 @@ mod v30 {
                     crossed_out: modifiers.contains(Modifier::CROSSED_OUT),
                 }),
             },
-            skipped: cell.skip || cell.diff_option == CellDiffOption::Skip,
+            skipped: cell.diff_option == CellDiffOption::Skip
+                || (cell.skip && cell.diff_option == CellDiffOption::None),
         }
     }
 
@@ -974,5 +975,16 @@ mod tests {
         let mut legacy = Buffer::empty(Rect::new(0, 0, 2, 1));
         legacy[(1, 0)].set_symbol("y").set_skip(true);
         assert_skipped(&to_grid(&legacy).unwrap_err(), 1, 0);
+
+        let mut overridden = Buffer::empty(Rect::new(0, 0, 1, 1));
+        overridden[(0, 0)]
+            .set_symbol("z")
+            .set_skip(true)
+            .set_diff_option(CellDiffOption::AlwaysUpdate);
+        assert_eq!(
+            to_grid(&overridden).unwrap().get(0, 0).unwrap().symbol,
+            "z",
+            "AlwaysUpdate overrides the deprecated skip flag in Ratatui's diff contract"
+        );
     }
 }
