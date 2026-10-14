@@ -15,6 +15,8 @@ ttyshot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
 
 The command runs at exactly `120x40`, waits until `Ready` is visible, writes `dashboard.png`, and terminates the complete child process group. Every wait has a deadline. A timeout names the failed condition and prints the last screen.
 
+Prebuilt macOS and Linux archives are planned but not published. Target and verification details are in [`docs/distribution-plan.md`](docs/distribution-plan.md).
+
 For a sequence with more than one frame:
 
 ```sh
@@ -58,8 +60,8 @@ See the validated v1 schema and key grammar in [`docs/scene-format.md`](docs/sce
 ## What makes the output exact
 
 - **One cell model.** Text, colors, SGR attributes, cursor state, and wide-cell continuations survive PTY, Ratatui, PNG, SVG, text, and JSON paths.
-- **Terminal geometry.** `U+2500–257F`, `U+2580–259F`, `U+2800–28FF`, legacy sextants/octants, and common Powerline separators are shapes aligned to cell edges.
-- **Pinned typography.** ttyshot bundles JetBrains Mono under the SIL Open Font License 1.1. PNG text uses the bundled bytes rather than a system font.
+- **Terminal geometry.** `U+2500–257F`, `U+2580–259F`, `U+2800–28FF`, legacy sextants/octants, Powerline separators, and common scrollbar glyphs are shapes aligned to cell edges.
+- **Pinned typography.** ttyshot bundles JetBrains Mono under the SIL Open Font License 1.1. PNG uses the bundled bytes; SVG emits reusable paths from the same selected glyphs instead of embedding a full font.
 - **Hermetic sessions.** `--env-clear`, repeatable `--env K=V`, `--cwd`, `--home`, an exact PTY size, and hard process-group timeouts remove common CI differences.
 - **No fixed sleeps.** Use `wait_text`, `wait_regex`, `wait_absent`, or `wait_stable` with explicit timeouts.
 
