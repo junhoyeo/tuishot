@@ -363,8 +363,11 @@ fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
 #[test]
 fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
     let pid_file = unique_pid_file("leader-exit");
+    let fifo_file = pid_file.with_extension("fifo");
     let script = format!(
-        "(trap '' HUP TERM; exec tail -f /dev/null) & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
+        "/usr/bin/mkfifo '{}'; (trap '' HUP TERM; exec /bin/cat '{}') & child=$!; printf '%s %s\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
+        fifo_file.display(),
+        fifo_file.display(),
         pid_file.display()
     );
     let session = shell_session(&script, Size::new(50, 4), Duration::from_millis(250));
@@ -381,6 +384,7 @@ fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
 
     drop(session);
     fs::remove_file(pid_file).unwrap();
+    fs::remove_file(fifo_file).unwrap();
 }
 
 #[test]

@@ -24,6 +24,7 @@ pub(crate) fn shapes(character: char, width: i32, height: i32) -> Option<Vec<Sha
     match character as u32 {
         0x2500..=0x257f => Some(box_shapes(character, width, height)),
         0x2580..=0x259f => Some(block_shapes(character, width, height)),
+        0x25ae | 0x25b4 | 0x25be => Some(geometric_shapes(character, width, height)),
         0x2800..=0x28ff => Some(braille_shapes(character, width, height)),
         0x1fb00..=0x1fb3b => Some(grid_shapes(
             SEXTANT_MASKS[(character as usize) - 0x1fb00],
@@ -245,6 +246,29 @@ fn block_shapes(character: char, width: i32, height: i32) -> Vec<Shape> {
     }
 }
 
+fn geometric_shapes(character: char, width: i32, height: i32) -> Vec<Shape> {
+    match character as u32 {
+        // BLACK VERTICAL RECTANGLE, used by stable terminal scrollbars.
+        0x25ae => {
+            let x = width / 4;
+            let y = height / 8;
+            vec![rect(x, y, width - 2 * x, height - 2 * y)]
+        }
+        // BLACK UP-/DOWN-POINTING SMALL TRIANGLE, used at scrollbar ends.
+        0x25b4 => vec![Shape::Polygon(vec![
+            (width / 2, height / 4),
+            (3 * width / 4, 3 * height / 4),
+            (width / 4, 3 * height / 4),
+        ])],
+        0x25be => vec![Shape::Polygon(vec![
+            (width / 4, height / 4),
+            (3 * width / 4, height / 4),
+            (width / 2, 3 * height / 4),
+        ])],
+        _ => unreachable!("geometric range is checked by shapes"),
+    }
+}
+
 fn quadrant_shapes(code: u32, width: i32, height: i32) -> Vec<Shape> {
     let mask = match code {
         0x2596 => 0b0100,
@@ -419,6 +443,10 @@ mod tests {
                 let result = shapes(character, 16, 24);
                 assert!(result.is_some(), "U+{code:04X} was not procedural");
             }
+        }
+        for code in [0x25ae, 0x25b4, 0x25be] {
+            let character = char::from_u32(code).unwrap();
+            assert!(shapes(character, 16, 24).is_some());
         }
     }
 }
