@@ -5,9 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Deterministic PNG and SVG renderer for ttyshot terminal cell grids"
+readme = "README.md"
+include = ["src/**", "assets/JetBrainsMono-Regular.ttf", "assets/OFL-JetBrainsMono.txt", "README.md", "Cargo.toml"]
 
 [lints]
 workspace = true
 
 [dependencies]
+base64 = "0.22.1"
+fontdue = "0.9.3"
+png = "0.18.1"
 ttyshot-core = { path = "../ttyshot-core" }
+
