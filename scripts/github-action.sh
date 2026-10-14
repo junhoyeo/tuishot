@@ -10,6 +10,10 @@ fail() {
   exit 1
 }
 
+quote_path() {
+  printf '%q' "$1"
+}
+
 normalize_repo_path() {
   local input="$1"
   local part joined=''
@@ -51,12 +55,135 @@ path_is_allowed() {
   return 1
 }
 
-write_outputs() {
-  local changed="$1"
-  local pr_url="$2"
-  printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
-  printf 'pr-url=%s\n' "$pr_url" >> "$GITHUB_OUTPUT"
+write_no_change_outputs() {
+  printf 'changed=false\n' >> "$GITHUB_OUTPUT"
+  printf 'pr-url=\n' >> "$GITHUB_OUTPUT"
 }
+
+write_changed_outputs() {
+  # Write this as soon as the generated branch exists remotely. If the PR API
+  # fails, a convergent rerun can reuse the branch and pr-url remains empty.
+  printf 'changed=true\n' >> "$GITHUB_OUTPUT"
+  printf 'pr-url=\n' >> "$GITHUB_OUTPUT"
+}
+
+remove_checkout_extraheaders() {
+  local key remaining
+  local -a keys=()
+  while IFS= read -r key; do
+    [[ -n "$key" ]] && keys+=("$key")
+  done < <(git --no-replace-objects config --local --name-only --get-regexp '^http\..*\.extraheader$' 2>/dev/null || true)
+  for key in "${keys[@]}"; do
+    git --no-replace-objects config --local --unset-all "$key" >/dev/null 2>&1 || true
+  done
+  remaining="$(git --no-replace-objects config --local --name-only --get-regexp '^http\..*\.extraheader$' 2>/dev/null || true)"
+  [[ -z "$remaining" ]] || fail 'could not remove all checkout HTTP extraheaders'
+}
+
+reassert_origin() {
+  local fetch_urls push_urls
+  # A scene is untrusted generated-content code. Recreate the remote section so
+  # it cannot redirect fetch/push with a changed URL or pushurl.
+  git --no-replace-objects config --local --remove-section remote.origin >/dev/null 2>&1 || true
+  git --no-replace-objects remote add origin "$ORIGIN_URL" || \
+    fail 'scene changed Git config so origin could not be restored safely'
+  remove_checkout_extraheaders
+  fetch_urls="$(git --no-replace-objects remote get-url --all origin)"
+  push_urls="$(git --no-replace-objects remote get-url --push --all origin)"
+  [[ "$fetch_urls" == "$ORIGIN_URL" && "$push_urls" == "$ORIGIN_URL" ]] || \
+    fail 'scene changed Git config so origin could not be restored exactly'
+}
+
+git_network() {
+  local encoded header
+  encoded="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\r\n')"
+  header="AUTHORIZATION: basic $encoded"
+  env -u GH_TOKEN -u GITHUB_TOKEN \
+    GIT_TERMINAL_PROMPT=0 \
+    GIT_NO_REPLACE_OBJECTS=1 \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_SYSTEM=/dev/null \
+    GIT_CONFIG_COUNT=5 \
+    GIT_CONFIG_KEY_0=http.extraheader \
+    GIT_CONFIG_VALUE_0= \
+    GIT_CONFIG_KEY_1=http.https://github.com/.extraheader \
+    GIT_CONFIG_VALUE_1="$header" \
+    GIT_CONFIG_KEY_2=credential.helper \
+    GIT_CONFIG_VALUE_2= \
+    GIT_CONFIG_KEY_3=core.hooksPath \
+    GIT_CONFIG_VALUE_3="$EMPTY_HOOKS" \
+    GIT_CONFIG_KEY_4=push.gpgSign \
+    GIT_CONFIG_VALUE_4=false \
+    git --no-replace-objects "$@"
+}
+
+fetch_base_oid() {
+  git_network fetch --quiet --no-tags --force origin \
+    "refs/heads/$BASE_BRANCH:$BASE_OBSERVED_REF" || \
+    fail "could not fetch base branch '$BASE_BRANCH'; check the ref and contents permission"
+  git --no-replace-objects rev-parse --verify "$BASE_OBSERVED_REF^{commit}"
+}
+
+read_remote_update_oid() {
+  local listing
+  if ! listing="$(git_network ls-remote --heads origin "$UPDATE_REF")"; then
+    fail 'could not inspect the update branch; check repository access and contents permission'
+  fi
+  REMOTE_UPDATE_OID=''
+  if [[ -n "$listing" ]]; then
+    [[ "$listing" != *$'\n'* ]] || fail 'remote returned more than one update-branch ref'
+    REMOTE_UPDATE_OID="${listing%%[[:space:]]*}"
+    [[ "$REMOTE_UPDATE_OID" =~ ^[0-9a-fA-F]{40,64}$ ]] || fail 'remote returned an invalid update-branch object ID'
+  fi
+}
+
+inventory_changes() {
+  CHANGED_PATHS=()
+  local changed_path existing already_seen
+  while IFS= read -r -d '' changed_path; do
+    already_seen=false
+    for existing in "${CHANGED_PATHS[@]}"; do
+      [[ "$existing" == "$changed_path" ]] && already_seen=true && break
+    done
+    [[ "$already_seen" == true ]] || CHANGED_PATHS+=("$changed_path")
+  done < <(git --no-replace-objects -c diff.renames=false diff --no-ext-diff --no-renames --ignore-submodules=none --name-only -z --)
+  while IFS= read -r -d '' changed_path; do
+    already_seen=false
+    for existing in "${CHANGED_PATHS[@]}"; do
+      [[ "$existing" == "$changed_path" ]] && already_seen=true && break
+    done
+    [[ "$already_seen" == true ]] || CHANGED_PATHS+=("$changed_path")
+  done < <(git --no-replace-objects -c diff.renames=false diff --cached --no-ext-diff --no-renames --ignore-submodules=none --name-only -z --)
+  while IFS= read -r -d '' changed_path; do
+    already_seen=false
+    for existing in "${CHANGED_PATHS[@]}"; do
+      [[ "$existing" == "$changed_path" ]] && already_seen=true && break
+    done
+    [[ "$already_seen" == true ]] || CHANGED_PATHS+=("$changed_path")
+  done < <(git --no-replace-objects ls-files --others --exclude-standard -z --)
+}
+
+audit_allowed_changes() {
+  local changed_path quoted
+  inventory_changes
+  for changed_path in "${CHANGED_PATHS[@]}"; do
+    if ! path_is_allowed "$changed_path"; then
+      quoted="$(quote_path "$changed_path")"
+      fail "scene changed a path outside the allowlist: $quoted"
+    fi
+  done
+}
+
+# Pull-request events run attacker-controlled repository content. Reject them
+# before checking the binary, repository, token, or scene.
+: "${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
+case "$GITHUB_EVENT_NAME" in
+  push|schedule|workflow_dispatch) ;;
+  pull_request|pull_request_target)
+    fail "event '$GITHUB_EVENT_NAME' is not trusted; use push, schedule, or workflow_dispatch"
+    ;;
+  *) fail "unsupported event '$GITHUB_EVENT_NAME'; use push, schedule, or workflow_dispatch" ;;
+esac
 
 : "${TTYSHOT_BIN:?TTYSHOT_BIN is required}"
 : "${TTYSHOT_SCENES:?TTYSHOT_SCENES is required}"
@@ -67,21 +194,27 @@ write_outputs() {
 : "${TTYSHOT_BASE_BRANCH:=}"
 : "${TTYSHOT_DEFAULT_BASE:=}"
 : "${GH_TOKEN:?A GitHub token is required; grant contents: write and pull-requests: write}"
+: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+
+[[ "$GITHUB_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || \
+  fail 'GITHUB_REPOSITORY must be an owner/repository name'
+readonly REPOSITORY_OWNER="${GITHUB_REPOSITORY%%/*}"
 
 command -v git >/dev/null || fail 'git is required'
 command -v gh >/dev/null || fail 'gh is required'
-[[ -x "$TTYSHOT_BIN" ]] || fail "ttyshot executable is missing: $TTYSHOT_BIN"
-git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail 'run this action after actions/checkout'
+command -v base64 >/dev/null || fail 'base64 is required'
+[[ -x "$TTYSHOT_BIN" ]] || fail "ttyshot executable is missing: $(quote_path "$TTYSHOT_BIN")"
+git --no-replace-objects rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail 'run this action after actions/checkout'
 [[ -n "$TTYSHOT_UPDATE_TITLE" ]] || fail 'title must not be empty'
-git check-ref-format --branch "$TTYSHOT_UPDATE_BRANCH" >/dev/null 2>&1 || \
-  fail "invalid update branch: $TTYSHOT_UPDATE_BRANCH"
+git --no-replace-objects check-ref-format --branch "$TTYSHOT_UPDATE_BRANCH" >/dev/null 2>&1 || \
+  fail "invalid update branch: $(quote_path "$TTYSHOT_UPDATE_BRANCH")"
 
 if ! normalize_repo_path "$TTYSHOT_SCENES"; then
   fail 'scenes must be a non-empty relative repository path without .git or .. segments'
 fi
 readonly SCENE_PATH="$NORMALIZED_PATH"
-[[ -f "$SCENE_PATH" ]] || fail "scene file does not exist: $SCENE_PATH"
+[[ -f "$SCENE_PATH" ]] || fail "scene file does not exist: $(quote_path "$SCENE_PATH")"
 
 ALLOWED_PATHS=()
 while IFS= read -r allowed_path || [[ -n "$allowed_path" ]]; do
@@ -102,125 +235,194 @@ while IFS= read -r allowed_path || [[ -n "$allowed_path" ]]; do
 done <<< "$TTYSHOT_ALLOWED_PATHS"
 ((${#ALLOWED_PATHS[@]} > 0)) || fail 'at least one allowed path is required'
 
+BASE_BRANCH="$TTYSHOT_BASE_BRANCH"
+if [[ -z "$BASE_BRANCH" ]]; then
+  BASE_BRANCH="$TTYSHOT_DEFAULT_BASE"
+fi
+if [[ -z "$BASE_BRANCH" ]]; then
+  BASE_BRANCH="$(git --no-replace-objects symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  BASE_BRANCH="${BASE_BRANCH#origin/}"
+fi
+[[ -n "$BASE_BRANCH" ]] || fail 'could not determine the base branch; set the base input'
+git --no-replace-objects check-ref-format --branch "$BASE_BRANCH" >/dev/null 2>&1 || \
+  fail "invalid base branch: $(quote_path "$BASE_BRANCH")"
+readonly BASE_BRANCH
+readonly UPDATE_REF="refs/heads/$TTYSHOT_UPDATE_BRANCH"
+readonly BASE_OBSERVED_REF='refs/ttyshot-action/base'
+readonly UPDATE_OBSERVED_REF='refs/ttyshot-action/update'
+
 work_tmp="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ttyshot-action.XXXXXX")"
 trap 'rm -rf "$work_tmp"' EXIT
+EMPTY_HOOKS="$work_tmp/empty-hooks"
+mkdir -p "$EMPTY_HOOKS"
+readonly EMPTY_HOOKS
 
 # A dirty checkout can mix human edits into the generated commit, so refuse it.
-git status --porcelain=v1 -z --untracked-files=all > "$work_tmp/status-before"
+git --no-replace-objects status --porcelain=v1 -z --untracked-files=all > "$work_tmp/status-before"
 [[ ! -s "$work_tmp/status-before" ]] || fail 'checkout must be clean before scene generation'
 
-write_outputs false ''
+origin_count="$(git --no-replace-objects remote get-url --all origin | awk 'END { print NR }')"
+[[ "$origin_count" == 1 ]] || fail 'origin must have exactly one fetch URL'
+ORIGIN_URL="$(git --no-replace-objects remote get-url origin)"
+readonly ORIGIN_URL
+remove_checkout_extraheaders
+LOCAL_CONFIG_PATH="$(git --no-replace-objects rev-parse --path-format=absolute --git-path config)"
+[[ "$LOCAL_CONFIG_PATH" == /* && -f "$LOCAL_CONFIG_PATH" ]] || \
+  fail 'could not locate the repository-local Git config'
+readonly LOCAL_CONFIG_PATH
+SANITIZED_CONFIG_SNAPSHOT="$work_tmp/local-config.before-scene"
+cp -p -- "$LOCAL_CONFIG_PATH" "$SANITIZED_CONFIG_SNAPSHOT"
+readonly SANITIZED_CONFIG_SNAPSHOT
 
-# ttyshot is expected to replace each output atomically. Even if it exits after
-# creating a partial output, no Git mutation or network operation occurs below.
-"$TTYSHOT_BIN" run "$SCENE_PATH" || fail 'scene generation failed; no commit or push was attempted'
+# Establish both the exact base and the existing update-branch lease before any
+# untrusted scene command runs.
+BASE_OID="$(fetch_base_oid)"
+readonly BASE_OID
+checkout_oid="$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')"
+[[ "$checkout_oid" == "$BASE_OID" ]] || \
+  fail "checkout HEAD is not the fetched tip of base branch '$BASE_BRANCH'"
+read_remote_update_oid
+OBSERVED_UPDATE_OID="$REMOTE_UPDATE_OID"
+readonly OBSERVED_UPDATE_OID
+if [[ -n "$OBSERVED_UPDATE_OID" ]]; then
+  git_network fetch --quiet --no-tags --force origin "$UPDATE_REF:$UPDATE_OBSERVED_REF" || \
+    fail 'could not fetch the observed update branch'
+  fetched_update_oid="$(git --no-replace-objects rev-parse --verify "$UPDATE_OBSERVED_REF^{commit}")"
+  [[ "$fetched_update_oid" == "$OBSERVED_UPDATE_OID" ]] || \
+    fail 'the update branch moved while it was being inspected; rerun the action'
+  remote_email="$(git --no-replace-objects show -s --format=%ae "$OBSERVED_UPDATE_OID")"
+  remote_body="$(git --no-replace-objects show -s --format=%B "$OBSERVED_UPDATE_OID")"
+  [[ "$remote_email" == "$BOT_EMAIL" && "$remote_body" == *"$COMMIT_MARKER"* ]] || \
+    fail "remote branch '$TTYSHOT_UPDATE_BRANCH' is not marked as an action-owned branch; choose a dedicated branch"
+fi
 
-CHANGED_PATHS=()
-while IFS= read -r -d '' changed_path; do
-  CHANGED_PATHS+=("$changed_path")
-done < <(git diff --name-only -z --)
-while IFS= read -r -d '' changed_path; do
-  CHANGED_PATHS+=("$changed_path")
-done < <(git diff --cached --name-only -z --)
-while IFS= read -r -d '' changed_path; do
-  CHANGED_PATHS+=("$changed_path")
-done < <(git ls-files --others --exclude-standard -z --)
+# Remove checkout-injected credentials before scene execution. The scene gets
+# neither common token environment variable and cannot inherit a GitHub header.
+remove_checkout_extraheaders
+env -u GH_TOKEN -u GITHUB_TOKEN GIT_NO_REPLACE_OBJECTS=1 \
+  "$TTYSHOT_BIN" run "$SCENE_PATH" || \
+  fail 'scene generation failed; no commit or push was attempted'
 
+# Restore the exact sanitized local config bytes before invoking Git again. In
+# particular, url.*.insteadOf, proxy, transport, pushurl, diff, and hook changes
+# made by the scene cannot affect the following inspection or publication.
+restored_config="$work_tmp/local-config.restored"
+cp -p -- "$SANITIZED_CONFIG_SNAPSHOT" "$restored_config"
+mv -f -- "$restored_config" "$LOCAL_CONFIG_PATH"
+
+# Restore and verify the recorded destination. All object inspection ignores
+# refs/replace.
+reassert_origin
+audit_allowed_changes
 if ((${#CHANGED_PATHS[@]} == 0)); then
+  write_no_change_outputs
   printf 'ttyshot action: screenshots are already current\n'
   exit 0
 fi
 
+# Stage each validated path literally. Never treat a generated filename as a
+# pathspec and never stage the whole worktree.
 for changed_path in "${CHANGED_PATHS[@]}"; do
-  path_is_allowed "$changed_path" || \
-    fail "scene changed a path outside the allowlist: $changed_path"
+  env -u GH_TOKEN -u GITHUB_TOKEN GIT_NO_REPLACE_OBJECTS=1 GIT_LITERAL_PATHSPECS=1 \
+    git --no-replace-objects -c core.hooksPath="$EMPTY_HOOKS" add -- "$changed_path"
 done
 
-base_branch="$TTYSHOT_BASE_BRANCH"
-if [[ -z "$base_branch" ]]; then
-  base_branch="$TTYSHOT_DEFAULT_BASE"
-fi
-if [[ -z "$base_branch" ]]; then
-  base_branch="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
-  base_branch="${base_branch#origin/}"
-fi
-[[ -n "$base_branch" ]] || fail 'could not determine the base branch; set the base input'
-git check-ref-format --branch "$base_branch" >/dev/null 2>&1 || fail "invalid base branch: $base_branch"
-
-readonly update_ref="refs/heads/$TTYSHOT_UPDATE_BRANCH"
-origin_url="$(git remote get-url origin)"
-if [[ "$origin_url" == https://github.com/* ]]; then
-  # Use this action's token for Git as well as gh, without placing it in a URL
-  # or command argument. The helper reads GH_TOKEN only when Git asks for it.
-  git config --local --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
-  git config --local credential.https://github.com.helper ''
-  git config --local --add credential.https://github.com.helper '!gh auth git-credential'
-fi
-remote_oid="$(git ls-remote --heads origin "$update_ref" | awk 'NR == 1 { print $1 }')"
-observed_ref='refs/ttyshot-action/observed'
-if [[ -n "$remote_oid" ]]; then
-  git fetch --no-tags origin "$update_ref:$observed_ref"
-  fetched_oid="$(git rev-parse "$observed_ref")"
-  [[ "$fetched_oid" == "$remote_oid" ]] || \
-    fail 'the update branch moved while it was being inspected; rerun the action'
-  remote_email="$(git show -s --format=%ae "$observed_ref")"
-  remote_body="$(git show -s --format=%B "$observed_ref")"
-  [[ "$remote_email" == "$BOT_EMAIL" && "$remote_body" == *"$COMMIT_MARKER"* ]] || \
-    fail "remote branch '$TTYSHOT_UPDATE_BRANCH' is not owned by the ttyshot action; choose a dedicated branch"
-fi
-
-# Stage each validated changed path explicitly. Never stage the whole worktree.
-for changed_path in "${CHANGED_PATHS[@]}"; do
-  git add -- "$changed_path"
-done
-
+# Re-inventory with rename detection and external diff disabled. This catches
+# disallowed rename sources and any path introduced during explicit staging.
+audit_allowed_changes
 STAGED_PATHS=()
 while IFS= read -r -d '' staged_path; do
   STAGED_PATHS+=("$staged_path")
-done < <(git diff --cached --name-only -z --)
+done < <(git --no-replace-objects -c diff.renames=false diff --cached --no-ext-diff --no-renames --ignore-submodules=none --name-only -z --)
 ((${#STAGED_PATHS[@]} > 0)) || fail 'changes disappeared before staging'
 for staged_path in "${STAGED_PATHS[@]}"; do
-  path_is_allowed "$staged_path" || fail "refusing to commit unexpected staged path: $staged_path"
+  if ! path_is_allowed "$staged_path"; then
+    fail "refusing to commit unexpected staged path: $(quote_path "$staged_path")"
+  fi
 done
 
-git config --local user.name "$BOT_NAME"
-git config --local user.email "$BOT_EMAIL"
+# The scene may have changed config, refs, HEAD, or the remote. Recreate origin,
+# refetch the base, and re-read the branch immediately before commit/push.
+reassert_origin
+fresh_base_oid="$(fetch_base_oid)"
+[[ "$fresh_base_oid" == "$BASE_OID" ]] || \
+  fail "base branch '$BASE_BRANCH' moved during generation; rerun on the new base"
+current_head="$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')"
+[[ "$current_head" == "$BASE_OID" ]] || fail 'checkout HEAD changed during scene generation'
+read_remote_update_oid
+[[ "$REMOTE_UPDATE_OID" == "$OBSERVED_UPDATE_OID" ]] || \
+  fail 'the update branch moved during generation; rerun the action'
 
-base_oid="$(git rev-parse HEAD)"
-staged_tree="$(git write-tree)"
+staged_tree="$(git --no-replace-objects write-tree)"
 commit_oid=''
 needs_push=true
-if [[ -n "$remote_oid" ]]; then
-  remote_tree="$(git show -s --format=%T "$observed_ref")"
-  remote_parent="$(git show -s --format=%P "$observed_ref")"
-  remote_subject="$(git show -s --format=%s "$observed_ref")"
-  if [[ "$remote_tree" == "$staged_tree" && "$remote_parent" == "$base_oid" && \
+if [[ -n "$OBSERVED_UPDATE_OID" ]]; then
+  remote_tree="$(git --no-replace-objects show -s --format=%T "$OBSERVED_UPDATE_OID")"
+  remote_parent="$(git --no-replace-objects show -s --format=%P "$OBSERVED_UPDATE_OID")"
+  remote_subject="$(git --no-replace-objects show -s --format=%s "$OBSERVED_UPDATE_OID")"
+  if [[ "$remote_tree" == "$staged_tree" && "$remote_parent" == "$BASE_OID" && \
         "$remote_subject" == "$TTYSHOT_UPDATE_TITLE" ]]; then
-    commit_oid="$remote_oid"
+    commit_oid="$OBSERVED_UPDATE_OID"
     needs_push=false
     printf 'ttyshot action: the observed update branch already has the generated tree\n'
   fi
 fi
 
 if [[ "$needs_push" == true ]]; then
-  git commit --no-verify -m "$TTYSHOT_UPDATE_TITLE" -m "$COMMIT_MARKER"
-  commit_oid="$(git rev-parse HEAD)"
-  if ! git push --force-with-lease="$update_ref:$remote_oid" origin "$commit_oid:$update_ref"; then
+  env -u GH_TOKEN -u GITHUB_TOKEN GIT_NO_REPLACE_OBJECTS=1 \
+    git --no-replace-objects \
+      -c core.hooksPath="$EMPTY_HOOKS" \
+      -c user.name="$BOT_NAME" \
+      -c user.email="$BOT_EMAIL" \
+      -c commit.gpgsign=false \
+      commit --no-verify -m "$TTYSHOT_UPDATE_TITLE" -m "$COMMIT_MARKER"
+  commit_oid="$(git --no-replace-objects rev-parse --verify 'HEAD^{commit}')"
+  commit_parent="$(git --no-replace-objects show -s --format=%P "$commit_oid")"
+  [[ "$commit_parent" == "$BASE_OID" ]] || fail 'generated commit does not have the recorded base as its only parent'
+  push_base_oid="$(fetch_base_oid)"
+  [[ "$push_base_oid" == "$BASE_OID" ]] || \
+    fail "base branch '$BASE_BRANCH' moved before push; rerun on the new base"
+  if ! git_network push --force-with-lease="$UPDATE_REF:$OBSERVED_UPDATE_OID" \
+      origin "$commit_oid:$UPDATE_REF"; then
     fail 'push failed; the branch may have moved or the workflow needs contents: write permission'
   fi
 fi
 
-existing_pr="$(gh pr list \
-  --state open \
-  --base "$base_branch" \
-  --head "$TTYSHOT_UPDATE_BRANCH" \
-  --limit 1 \
-  --json url \
-  --jq '.[0].url // empty')" || \
-  fail 'could not query pull requests; grant pull-requests: write permission'
+write_changed_outputs
 
-if [[ -n "$existing_pr" ]]; then
-  pr_url="$existing_pr"
+# Verify the remote still names the exact commit before looking up or creating a
+# PR. A later API failure intentionally leaves the dedicated branch in place.
+read_remote_update_oid
+[[ "$REMOTE_UPDATE_OID" == "$commit_oid" ]] || \
+  fail 'the update branch moved after push; refusing to query or create a pull request'
+
+pr_rows="$work_tmp/open-prs.tsv"
+if ! gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+    -f state=open \
+    -f head="$REPOSITORY_OWNER:$TTYSHOT_UPDATE_BRANCH" \
+    -f base="$BASE_BRANCH" \
+    -f per_page=100 \
+    --paginate \
+    --jq '.[] | [.html_url, .head.ref, .head.sha, .head.repo.full_name, .base.ref, .base.repo.full_name] | @tsv' \
+    > "$pr_rows"; then
+  fail 'could not query pull requests; grant pull-requests: write permission and verify fork policy'
+fi
+
+pr_url=''
+exact_pr_count=0
+while IFS=$'\t' read -r candidate_url candidate_head candidate_oid candidate_head_repo candidate_base candidate_base_repo; do
+  if [[ "$candidate_head" == "$TTYSHOT_UPDATE_BRANCH" && \
+        "$candidate_oid" == "$commit_oid" && \
+        "$candidate_head_repo" == "$GITHUB_REPOSITORY" && \
+        "$candidate_base" == "$BASE_BRANCH" && \
+        "$candidate_base_repo" == "$GITHUB_REPOSITORY" ]]; then
+    pr_url="$candidate_url"
+    ((exact_pr_count += 1))
+  fi
+done < "$pr_rows"
+((exact_pr_count <= 1)) || fail 'GitHub returned multiple open pull requests for the exact repository, head, base, and commit'
+
+if [[ -n "$pr_url" ]]; then
   printf 'ttyshot action: reusing %s\n' "$pr_url"
 else
   body_file="$work_tmp/pr-body.md"
@@ -237,13 +439,14 @@ Generated by the ttyshot GitHub Action.
 EOF
   fi
   if ! pr_url="$(gh pr create \
-    --base "$base_branch" \
-    --head "$TTYSHOT_UPDATE_BRANCH" \
-    --title "$TTYSHOT_UPDATE_TITLE" \
-    --body-file "$body_file")"; then
-    fail 'could not create the pull request; grant pull-requests: write permission'
+      --repo "$GITHUB_REPOSITORY" \
+      --base "$BASE_BRANCH" \
+      --head "$REPOSITORY_OWNER:$TTYSHOT_UPDATE_BRANCH" \
+      --title "$TTYSHOT_UPDATE_TITLE" \
+      --body-file "$body_file")"; then
+    fail 'could not create the pull request; grant pull-requests: write permission and verify fork policy'
   fi
 fi
 
 [[ "$pr_url" != *$'\n'* && "$pr_url" != *$'\r'* ]] || fail 'gh returned an invalid pull request URL'
-write_outputs true "$pr_url"
+printf 'pr-url=%s\n' "$pr_url" >> "$GITHUB_OUTPUT"

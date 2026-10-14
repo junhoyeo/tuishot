@@ -41,6 +41,22 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Reject untrusted workflow events
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${GITHUB_EVENT_NAME:?}" in
+          push|schedule|workflow_dispatch) ;;
+          pull_request|pull_request_target)
+            printf 'ttyshot action: event %s is not trusted; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
+            exit 1
+            ;;
+          *)
+            printf 'ttyshot action: unsupported event %s; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
+            exit 1
+            ;;
+        esac
+
     - name: Build this action checkout
       id: build
       shell: bash
@@ -50,14 +66,20 @@ runs:
           printf 'ttyshot action: only Linux runners are supported before the public launch\n' >&2
           exit 1
         fi
-        build_root="$RUNNER_TEMP/ttyshot-action-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-        mkdir -p "$build_root"
+        cd -- "$GITHUB_ACTION_PATH"
+        build_root="$(mktemp -d "$RUNNER_TEMP/ttyshot-action.XXXXXX")"
+        cargo_home="$(mktemp -d "$RUNNER_TEMP/ttyshot-cargo-home.XXXXXX")"
+        unset RUSTC_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_RUSTC_WRAPPER
+        export CARGO_HOME="$cargo_home"
+        target_triple="$(rustc -vV | sed -n 's/^host: //p')"
+        [[ -n "$target_triple" ]] || { printf 'ttyshot action: could not determine the Rust host target\n' >&2; exit 1; }
         cargo build \
           --locked \
           --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" \
           --package ttyshot \
+          --target "$target_triple" \
           --target-dir "$build_root/target"
-        printf 'ttyshot-bin=%s\n' "$build_root/target/debug/ttyshot" >> "$GITHUB_OUTPUT"
+        printf 'ttyshot-bin=%s\n' "$build_root/target/$target_triple/debug/ttyshot" >> "$GITHUB_OUTPUT"
 
     - name: Run scenes and update pull request
       id: update
