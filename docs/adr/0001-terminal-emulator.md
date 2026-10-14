@@ -30,11 +30,11 @@ The concrete source points used above are:
 
 Use `alacritty_terminal` 0.26.0 with default features disabled. ttyshot supplies a small event listener that writes terminal replies to the PTY and resolves OSC 10/11 from the selected deterministic theme.
 
-Use a narrow Unix PTY/process helper owned by ttyshot instead of Alacritty's PTY wrapper. Alacritty's `tty::Options` always inherits the parent environment, while ttyshot requires a true environment-clear mode and exact process-group lifetime control.
+Use Alacritty's Unix PTY wrapper, which creates a new session/process group and applies the exact initial window size. In inherit mode, ttyshot passes deterministic terminal variables as overrides. In clear mode, the PTY child starts through `/usr/bin/env -i`, so the target command cannot observe the environment that Alacritty's wrapper inherited. ttyshot records the session leader and uses a safe `nix::killpg` call for timeout and drop cleanup.
 
 ## Consequences
 
 - v0.1 gets the required query behavior from the same state machine that tracks the screen. Integration tests must run query-producing children and assert the replies they receive.
 - The emulator dependency is heavier than `vt100`, but avoids a parallel escape-sequence implementation and gives better modern-TUI compatibility.
-- ttyshot has a small documented `unsafe` boundary for `setsid`, controlling-terminal setup, window-size ioctls, and process-group signaling. The rest of `ttyshot-term` remains `unsafe`-forbidden.
+- PTY setup and resizing use Alacritty's platform implementation. `ttyshot-term` adds no unsafe code, so the workspace `unsafe_code = "forbid"` policy remains in force.
 - If dependency size becomes material, a later ADR can evaluate a focused upstream feature split or a smaller emulator only after it provides the same query contract.
