@@ -27,6 +27,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: junhoyeo/ttyshot@v0
         with:
           scenes: fixtures/readme/ttyshot.toml

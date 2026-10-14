@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Check out the base branch
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Refresh synthetic fixture screenshots
         id: ttyshot

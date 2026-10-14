@@ -128,6 +128,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: junhoyeo/ttyshot@v0
         with:
           scenes: ttyshot.toml
@@ -137,7 +139,7 @@ jobs:
 
 Use fixture data in public images. Do not capture a developer's real home directory, account totals, paths, tokens, or model history.
 
-The action input and branch-safety contract is documented in [`docs/action-plan.md`](docs/action-plan.md).
+The implemented action inputs, trusted-ref model, and branch-safety contract are documented in [`docs/github-action.md`](docs/github-action.md). The launch design notes remain in [`docs/action-plan.md`](docs/action-plan.md).
 
 ## Coding-agent recipe
 
