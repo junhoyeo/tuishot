@@ -21,6 +21,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features --locked
+      - name: Render synthetic scene example
+        run: cargo run --locked -p ttyshot -- run crates/ttyshot/examples/synthetic.toml
       - name: Ratatui feature matrix
         run: |
           cargo test -p ttyshot-ratatui --locked
