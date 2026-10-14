@@ -57,12 +57,14 @@ fn shell_session(script: &str, size: Size, timeout: Duration) -> Session {
 
 #[test]
 fn pty_starts_at_the_exact_requested_size() {
-    let session = SessionBuilder::new(Command::new("/bin/stty").arg("size"))
-        .size(Size::new(73, 19))
-        .environment(clear_environment())
-        .timeout(Duration::from_secs(2))
-        .spawn()
-        .unwrap();
+    let session = SessionBuilder::new(
+        Command::new("/bin/sh").args(["-c", "stty size; dd bs=1 count=1 of=/dev/null 2>/dev/null"]),
+    )
+    .size(Size::new(73, 19))
+    .environment(clear_environment())
+    .timeout(Duration::from_secs(2))
+    .spawn()
+    .unwrap();
 
     let grid = session.wait_text("19 73", Duration::from_secs(1)).unwrap();
     assert_eq!((grid.columns(), grid.rows()), (73, 19));
