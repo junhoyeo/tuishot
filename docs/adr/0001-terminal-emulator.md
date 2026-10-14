@@ -35,6 +35,8 @@ Use Alacritty's Unix PTY wrapper, which creates a new session/process group and 
 ## Consequences
 
 - v0.1 gets the required query behavior from the same state machine that tracks the screen. Integration tests must run query-producing children and assert the replies they receive.
+- Alacritty 0.26 parses SGR 5/6 but deliberately drops `Attr::BlinkSlow` and `Attr::BlinkFast` in `Term::terminal_attribute`; its public cell flags expose no blink state. ttyshot maps every visual SGR flag the API exposes, but captured blink remains [`Blink::None`](../../crates/ttyshot-core/src/lib.rs) until the emulator preserves it. This is a known fidelity gap rather than a false claim of support.
 - The emulator dependency is heavier than `vt100`, but avoids a parallel escape-sequence implementation and gives better modern-TUI compatibility.
 - PTY setup and resizing use Alacritty's platform implementation. `ttyshot-term` adds no unsafe code, so the workspace `unsafe_code = "forbid"` policy remains in force.
+- Alacritty publishes `MIN_COLUMNS = 2` as a full-width-glyph recommendation, but its public `Grid`/`Term` constructors do not enforce it. ttyshot accepts exact `1x1` PTYs and has an integration fixture that verifies both the kernel size and one-cell snapshot; a wide glyph at the single-cell edge is repaired to a blank by the shared grid invariant.
 - If dependency size becomes material, a later ADR can evaluate a focused upstream feature split or a smaller emulator only after it provides the same query contract.

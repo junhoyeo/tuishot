@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use nix::errno::Errno;
 use nix::sys::signal::killpg;
 use nix::unistd::Pid;
-use ttyshot_term::{Command, Environment, Key, Session, SessionBuilder, Size};
+use ttyshot_term::{Command, DriverError, Environment, Key, Session, SessionBuilder, Size};
 
 const QUERY_SCRIPT: &str = r#"
 stty raw -echo
@@ -62,11 +62,52 @@ fn pty_starts_at_the_exact_requested_size() {
 }
 
 #[test]
+fn one_by_one_pty_size_is_preserved() {
+    let script = r#"
+stty raw -echo
+actual=$(stty size)
+[ "$actual" = "1 1" ] || exit 9
+printf X
+dd bs=1 count=1 of=/dev/null 2>/dev/null
+"#;
+    let session = shell_session(script, Size::new(1, 1), Duration::from_secs(2));
+    let grid = session.wait_text("X", Duration::from_secs(1)).unwrap();
+    assert_eq!((grid.columns(), grid.rows()), (1, 1));
+}
+
+#[test]
 fn child_receives_all_required_terminal_query_replies() {
     let session = shell_session(QUERY_SCRIPT, Size::new(80, 8), Duration::from_secs(2));
 
     session
         .wait_text("QUERY_OK", Duration::from_secs(1))
+        .unwrap();
+}
+
+#[test]
+fn keys_follow_enabled_kitty_keyboard_mode() {
+    let script = r#"
+stty raw -echo
+esc=$(printf '\033')
+printf '\033[>8u\033[?u'
+actual=$(dd bs=1 count=5 2>/dev/null)
+[ "$actual" = "${esc}[?8u" ] || exit 10
+printf KITTY_READY
+actual=$(dd bs=1 count=7 2>/dev/null)
+[ "$actual" = "${esc}[97;1u" ] || exit 11
+actual=$(dd bs=1 count=6 2>/dev/null)
+[ "$actual" = "${esc}[1;1A" ] || exit 12
+printf '\033[H\033[2JKITTY_KEY_OK'
+dd bs=1 count=1 of=/dev/null 2>/dev/null
+"#;
+    let session = shell_session(script, Size::new(40, 4), Duration::from_secs(2));
+    session
+        .wait_text("KITTY_READY", Duration::from_secs(1))
+        .unwrap();
+    session.key(Key::Char('a')).unwrap();
+    session.key(Key::Up).unwrap();
+    session
+        .wait_text("KITTY_KEY_OK", Duration::from_secs(1))
         .unwrap();
 }
 
@@ -190,16 +231,64 @@ fn inherited_environment_keeps_parent_values_and_applies_overrides() {
 }
 
 #[test]
-fn styled_wide_output_converts_to_the_shared_grid() {
+fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
+    let output = concat!(
+        "\x1b[1mB\x1b[0m",
+        "\x1b[2mD\x1b[0m",
+        "\x1b[3mI\x1b[0m",
+        "\x1b[4mU\x1b[0m",
+        "\x1b[4:2m2\x1b[0m",
+        "\x1b[4:3mC\x1b[0m",
+        "\x1b[4:4mO\x1b[0m",
+        "\x1b[4:5mA\x1b[0m",
+        "\x1b[7mR\x1b[0m",
+        "\x1b[8mH\x1b[0m",
+        "\x1b[9mS\x1b[0m",
+        "\x1b[5mL\x1b[0m",
+        "\x1b[38;2;1;2;3;48;5;4mX\x1b[0m界"
+    );
     let session = shell_session(
-        "printf '\\033[1;38;2;1;2;3;48;5;4mX\\033[0m界'",
-        Size::new(20, 3),
+        &format!("printf '{output}'"),
+        Size::new(30, 3),
         Duration::from_secs(2),
     );
-    let grid = session.wait_text("X界", Duration::from_secs(1)).unwrap();
+    let grid = session
+        .wait_text("BDIU2COARHSLX界", Duration::from_secs(1))
+        .unwrap();
 
-    let styled = grid.get(0, 0).unwrap();
-    assert!(styled.style.attributes.bold);
+    assert!(grid.get(0, 0).unwrap().style.attributes.bold);
+    assert!(grid.get(1, 0).unwrap().style.attributes.dim);
+    assert!(grid.get(2, 0).unwrap().style.attributes.italic);
+    assert_eq!(
+        grid.get(3, 0).unwrap().style.attributes.underline,
+        ttyshot_term::core::Underline::Single
+    );
+    assert_eq!(
+        grid.get(4, 0).unwrap().style.attributes.underline,
+        ttyshot_term::core::Underline::Double
+    );
+    assert_eq!(
+        grid.get(5, 0).unwrap().style.attributes.underline,
+        ttyshot_term::core::Underline::Curly
+    );
+    assert_eq!(
+        grid.get(6, 0).unwrap().style.attributes.underline,
+        ttyshot_term::core::Underline::Dotted
+    );
+    assert_eq!(
+        grid.get(7, 0).unwrap().style.attributes.underline,
+        ttyshot_term::core::Underline::Dashed
+    );
+    assert!(grid.get(8, 0).unwrap().style.attributes.reverse);
+    assert!(grid.get(9, 0).unwrap().style.attributes.hidden);
+    assert!(grid.get(10, 0).unwrap().style.attributes.strikethrough);
+    // Alacritty 0.26 exposes no cell flag for SGR 5/6; the ADR records this gap.
+    assert_eq!(
+        grid.get(11, 0).unwrap().style.attributes.blink,
+        ttyshot_term::core::Blink::None
+    );
+
+    let styled = grid.get(12, 0).unwrap();
     assert_eq!(
         styled.style.foreground,
         ttyshot_term::core::Color::Rgb(ttyshot_term::core::Rgb::new(1, 2, 3))
@@ -209,11 +298,11 @@ fn styled_wide_output_converts_to_the_shared_grid() {
         ttyshot_term::core::Color::Indexed(4)
     );
     assert_eq!(
-        grid.get(1, 0).unwrap().width,
+        grid.get(13, 0).unwrap().width,
         ttyshot_term::core::CellWidth::Wide
     );
     assert_eq!(
-        grid.get(2, 0).unwrap().width,
+        grid.get(14, 0).unwrap().width,
         ttyshot_term::core::CellWidth::Continuation
     );
 }
@@ -231,6 +320,7 @@ fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
     let error = session
         .wait_text("NEVER", Duration::from_secs(2))
         .unwrap_err();
+    assert!(matches!(&error, DriverError::Timeout { .. }), "{error}");
     let message = error.to_string();
     assert!(message.contains("text \"NEVER\""), "{message}");
     assert!(message.contains("TREE_READY"), "{message}");

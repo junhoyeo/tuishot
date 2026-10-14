@@ -27,7 +27,7 @@ use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use regex::Regex;
 use ttyshot_core::{
-    Attributes, CellWidth, Color, Cursor, CursorShape, Grid, Rgb, Style, Theme, Underline,
+    Attributes, Blink, CellWidth, Color, Cursor, CursorShape, Grid, Rgb, Style, Theme, Underline,
 };
 
 pub use ttyshot_core as core;
@@ -49,9 +49,9 @@ impl Size {
     }
 
     fn validate(self) -> Result<Self, DriverError> {
-        if self.columns < 2 || self.rows == 0 {
+        if self.columns == 0 || self.rows == 0 {
             return Err(DriverError::Configuration(
-                "terminal size must have at least 2 columns and 1 row".to_owned(),
+                "terminal size must have at least 1 column and 1 row".to_owned(),
             ));
         }
         Ok(self)
@@ -300,18 +300,16 @@ pub struct Session {
     control: Arc<Control>,
     process_group: Pid,
     deadline: Instant,
-    loop_thread: Option<
-        JoinHandle<(
-            EventLoop<tty::Pty, DriverEventProxy>,
-            alacritty_terminal::event_loop::State,
-        )>,
-    >,
+    loop_thread: Option<JoinHandle<()>>,
     watchdog_thread: Option<JoinHandle<()>>,
 }
 
 impl Session {
     fn spawn(builder: SessionBuilder) -> Result<Self, DriverError> {
         let size = builder.size.validate()?;
+        let deadline = Instant::now()
+            .checked_add(builder.timeout)
+            .ok_or_else(|| DriverError::Configuration("overall timeout is too large".to_owned()))?;
         if builder.command.program.is_empty() {
             return Err(DriverError::Configuration(
                 "command program must not be empty".to_owned(),
@@ -388,11 +386,16 @@ impl Session {
         *sender_slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender.clone());
-        let loop_thread = event_loop.spawn();
+        let pty_thread = event_loop.spawn();
+        let loop_control = Arc::clone(&control);
+        let loop_thread = thread::Builder::new()
+            .name("ttyshot PTY completion".to_owned())
+            .spawn(move || {
+                let _ = pty_thread.join();
+                loop_control.finish_exit();
+            })
+            .map_err(|error| DriverError::Spawn(error.to_string()))?;
 
-        let deadline = Instant::now()
-            .checked_add(builder.timeout)
-            .ok_or_else(|| DriverError::Configuration("overall timeout is too large".to_owned()))?;
         let watchdog_control = Arc::clone(&control);
         let watchdog_thread = thread::Builder::new()
             .name("ttyshot timeout".to_owned())
@@ -410,13 +413,17 @@ impl Session {
         })
     }
 
-    /// Sends one key to the child.
+    /// Sends one unmodified key press to the child.
+    ///
+    /// Legacy mode honors application-cursor mode. When the child enables the
+    /// kitty keyboard protocol, this method emits Kitty's modifier-1 key-press
+    /// forms and honors report-all-keys and associated-text flags.
     ///
     /// # Errors
     /// Returns an error after the child exits or the session deadline expires.
     pub fn key(&self, key: Key) -> Result<(), DriverError> {
-        let app_cursor = self.terminal.lock().mode().contains(TermMode::APP_CURSOR);
-        let bytes = key_bytes(key, app_cursor)?;
+        let mode = *self.terminal.lock().mode();
+        let bytes = key_bytes(key, mode)?;
         self.send(bytes)
     }
 
@@ -653,7 +660,24 @@ impl Control {
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.process = ProcessState::ExitPending(status.code());
+        if matches!(
+            state.process,
+            ProcessState::Running | ProcessState::ExitPending(_)
+        ) {
+            state.process = ProcessState::ExitPending(status.code());
+        }
+    }
+
+    fn finish_exit(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let ProcessState::ExitPending(status) = state.process {
+            state.process = ProcessState::Exited(status);
+            state.generation = state.generation.wrapping_add(1);
+            self.condvar.notify_all();
+        }
     }
 
     fn wakeup(&self) {
@@ -818,7 +842,12 @@ fn query_color(theme: &Theme, index: usize) -> AlacrittyRgb {
     }
 }
 
-fn key_bytes(key: Key, app_cursor: bool) -> Result<Vec<u8>, DriverError> {
+fn key_bytes(key: Key, mode: TermMode) -> Result<Vec<u8>, DriverError> {
+    if mode.intersects(TermMode::KITTY_KEYBOARD_PROTOCOL) {
+        return kitty_key_bytes(key, mode);
+    }
+
+    let app_cursor = mode.contains(TermMode::APP_CURSOR);
     let bytes = match key {
         Key::Enter => b"\r".to_vec(),
         Key::Escape => b"\x1b".to_vec(),
@@ -836,17 +865,63 @@ fn key_bytes(key: Key, app_cursor: bool) -> Result<Vec<u8>, DriverError> {
         Key::Delete => b"\x1b[3~".to_vec(),
         Key::Function(number @ 1..=4) => vec![0x1b, b'O', b'P' + number - 1],
         Key::Function(number @ 5..=12) => {
-            const CODES: [u8; 8] = [15, 17, 18, 19, 20, 21, 23, 24];
-            format!("\x1b[{}~", CODES[usize::from(number - 5)]).into_bytes()
+            format!("\x1b[{}~", function_key_code(number)?).into_bytes()
         }
-        Key::Function(number) => {
-            return Err(DriverError::Configuration(format!(
-                "function key F{number} is outside F1 through F12"
-            )));
-        }
+        Key::Function(number) => return Err(invalid_function_key(number)),
         Key::Char(character) => character.to_string().into_bytes(),
     };
     Ok(bytes)
+}
+
+// ttyshot currently exposes unmodified key presses only. Kitty mode therefore
+// uses modifier parameter 1 and no event suffix. Literal text remains literal
+// unless REPORT_ALL_KEYS_AS_ESC is active; functional keys use Kitty's enhanced
+// legacy forms. REPORT_ASSOCIATED_TEXT adds the generated scalar for characters.
+fn kitty_key_bytes(key: Key, mode: TermMode) -> Result<Vec<u8>, DriverError> {
+    let report_all = mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC);
+    let associated_text = mode.contains(TermMode::REPORT_ASSOCIATED_TEXT);
+    let sequence = match key {
+        Key::Char(character) if !report_all => return Ok(character.to_string().into_bytes()),
+        Key::Char(character) => {
+            let text = if associated_text {
+                format!(";{}", u32::from(character))
+            } else {
+                String::new()
+            };
+            format!("\x1b[{};1{text}u", u32::from(character))
+        }
+        Key::Enter => "\x1b[13;1u".to_owned(),
+        Key::Escape => "\x1b[27;1u".to_owned(),
+        Key::Tab => "\x1b[9;1u".to_owned(),
+        Key::Backspace => "\x1b[127;1u".to_owned(),
+        Key::Up => "\x1b[1;1A".to_owned(),
+        Key::Down => "\x1b[1;1B".to_owned(),
+        Key::Right => "\x1b[1;1C".to_owned(),
+        Key::Left => "\x1b[1;1D".to_owned(),
+        Key::Home => "\x1b[1;1H".to_owned(),
+        Key::End => "\x1b[1;1F".to_owned(),
+        Key::PageUp => "\x1b[5;1~".to_owned(),
+        Key::PageDown => "\x1b[6;1~".to_owned(),
+        Key::Insert => "\x1b[2;1~".to_owned(),
+        Key::Delete => "\x1b[3;1~".to_owned(),
+        Key::Function(number @ 1..=12) => {
+            format!("\x1b[{};1~", function_key_code(number)?)
+        }
+        Key::Function(number) => return Err(invalid_function_key(number)),
+    };
+    Ok(sequence.into_bytes())
+}
+
+fn function_key_code(number: u8) -> Result<u8, DriverError> {
+    const CODES: [u8; 12] = [11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24];
+    CODES
+        .get(usize::from(number.saturating_sub(1)))
+        .copied()
+        .ok_or_else(|| invalid_function_key(number))
+}
+
+fn invalid_function_key(number: u8) -> DriverError {
+    DriverError::Configuration(format!("function key F{number} is outside F1 through F12"))
 }
 
 fn cursor_key(app_cursor: bool, final_byte: u8) -> Vec<u8> {
@@ -939,6 +1014,7 @@ fn cell_style(cell: &alacritty_terminal::term::cell::Cell) -> Style {
             dim: flags.contains(Flags::DIM),
             italic: flags.contains(Flags::ITALIC),
             underline,
+            blink: Blink::None,
             reverse: flags.contains(Flags::INVERSE),
             hidden: flags.contains(Flags::HIDDEN),
             strikethrough: flags.contains(Flags::STRIKEOUT),
@@ -1053,3 +1129,74 @@ impl fmt::Display for DriverError {
 }
 
 impl Error for DriverError {}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn child_exit_is_finalized_by_wakeup() {
+        let control = Control::default();
+        control.child_exited(ExitStatus::from_raw(0));
+        assert!(matches!(
+            control
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .process,
+            ProcessState::ExitPending(Some(0))
+        ));
+
+        control.wakeup();
+
+        assert!(matches!(
+            control
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .process,
+            ProcessState::Exited(Some(0))
+        ));
+    }
+
+    #[test]
+    fn event_loop_completion_finalizes_a_pending_exit_without_wakeup() {
+        let control = Control::default();
+        control.child_exited(ExitStatus::from_raw(0));
+
+        control.finish_exit();
+
+        assert!(matches!(
+            control
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .process,
+            ProcessState::Exited(Some(0))
+        ));
+    }
+
+    #[test]
+    fn hard_timeout_cause_survives_child_exit_events() {
+        let control = Control::default();
+        control
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .process = ProcessState::TimedOut;
+
+        control.child_exited(ExitStatus::from_raw(9));
+        control.wakeup();
+        control.finish_exit();
+
+        assert!(matches!(
+            control
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .process,
+            ProcessState::TimedOut
+        ));
+    }
+}
