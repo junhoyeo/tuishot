@@ -62,11 +62,12 @@ panel = "Models by Cost"
 - `timeout` is valid only on wait steps.
 - `panel` and `crop` are mutually exclusive and valid only on `shot`.
 - Scene names and resolved output paths are unique.
+- `shot` is one basename component. Absolute paths, separators, `.` and `..` are rejected; use `output_dir` for directories.
 - Sizes and crop dimensions are non-zero. Crops must fit the captured grid.
 - Environment keys cannot contain `=` or NUL. Commands and paths cannot contain NUL.
 - `version` must be exactly `1`.
 
-Relative `cwd`, `home`, font, fixture, and output paths resolve from the scene file's directory, not the caller's current directory.
+Relative `cwd`, `home`, font, fixture, and output paths resolve from the scene file's directory, not the caller's current directory. A path-like command program such as `./bin/app` resolves from the scene directory; a bare program such as `gitui` still uses `PATH`. Command arguments are passed literally, so set `cwd` when they contain relative fixture paths.
 
 ## Keys
 

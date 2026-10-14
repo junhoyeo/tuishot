@@ -28,10 +28,12 @@ version = 1
 size = "120x40"
 timeout = "30s"
 env_clear = true
+output_dir = "screenshots"
 
 [[scene]]
 name = "dashboard"
 command = ["my-tui", "--fixture", "fixtures/demo.json"]
+cwd = "."
 env = { TERM = "xterm-256color", LANG = "en_US.UTF-8" }
 
 [[scene.step]]
@@ -44,7 +46,7 @@ key = "tab"
 wait_stable = "300ms"
 
 [[scene.step]]
-shot = "screenshots/dashboard"
+shot = "dashboard"
 formats = ["png", "svg", "txt", "json"]
 panel = "Models by Cost"
 ```
@@ -66,7 +68,16 @@ PNG encoding is deterministic. The test suite renders the same golden twice, che
 ## One-shot capture
 
 ```sh
-ttyshot   -o screenshots/status.png   --size 100x30   --wait-regex 'Connected|Ready'   --keys 'tab,enter'   --env-clear   --env TERM=xterm-256color   --env LANG=en_US.UTF-8   --cwd ./fixtures   -- ./demo-tui
+ttyshot \
+  -o screenshots/status.png \
+  --size 100x30 \
+  --wait-regex 'Connected|Ready' \
+  --keys 'tab,enter' \
+  --env-clear \
+  --env TERM=xterm-256color \
+  --env LANG=en_US.UTF-8 \
+  --cwd ./fixtures \
+  -- ./demo-tui
 ```
 
 Available output formats are `png`, `svg`, `txt`, and `json`. Text is useful for assertions. JSON preserves styles and explicit wide-cell continuations for coding agents and structured diffs.
@@ -81,11 +92,15 @@ ttyshot-ratatui = { git = "https://github.com/junhoyeo/ttyshot", features = ["ra
 ```
 
 ```rust
-use ttyshot_ratatui::{snapshot_json, snapshot_text, BufferExt};
+use ttyshot_ratatui::{
+    snapshot_json, snapshot_png, snapshot_svg, snapshot_text, BufferExt,
+};
 
 let grid = buffer.to_ttyshot_grid()?;
 insta::assert_snapshot!(snapshot_text(&buffer)?);
 insta::assert_snapshot!(snapshot_json(&buffer)?);
+insta::assert_binary_snapshot!("dashboard.png", snapshot_png(&buffer)?);
+insta::assert_snapshot!(snapshot_svg(&buffer)?);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
@@ -114,6 +129,7 @@ jobs:
       - uses: junhoyeo/ttyshot@v0
         with:
           scenes: ttyshot.toml
+          paths: screenshots
           branch: ttyshot/update-screenshots
 ```
 
@@ -126,7 +142,10 @@ The action input and branch-safety contract is documented in [`docs/action-plan.
 Give an agent both pixels and state:
 
 ```sh
-ttyshot -o /tmp/settings.png --format png,json,txt   --size 100x30 --wait-text "Settings" -- my-tui
+ttyshot \
+  -o /tmp/settings.png --format png,json,txt \
+  --size 100x30 --wait-text "Settings" \
+  -- my-tui
 ```
 
 The agent can inspect the PNG, assert text without OCR, and read exact cell colors from JSON. If the screen never appears, ttyshot exits non-zero with the failed wait and last screen instead of hanging.
