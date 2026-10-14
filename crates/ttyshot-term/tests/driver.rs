@@ -194,7 +194,7 @@ fn clear_environment_applies_overrides_cwd_and_optional_home() {
         .home(&home);
     let session = SessionBuilder::new(Command::new("/bin/sh").args([
         "-c",
-        "printf 'cwd='; /bin/pwd; printf 'home=%s\\nvalue=%s\\nterm=%s\\n' \"$HOME\" \"$FIXTURE_VALUE\" \"$TERM\"",
+        "printf 'cwd='; /bin/pwd; printf 'home=%s\\nvalue=%s\\nterm=%s\\n' \"$HOME\" \"$FIXTURE_VALUE\" \"$TERM\"; dd bs=1 count=1 of=/dev/null 2>/dev/null",
     ]))
     .size(Size::new(120, 8))
     .environment(environment)
@@ -224,7 +224,7 @@ fn clear_environment_applies_overrides_cwd_and_optional_home() {
 fn inherited_environment_keeps_parent_values_and_applies_overrides() {
     let session = SessionBuilder::new(Command::new("/bin/sh").args([
         "-c",
-        "test -n \"$PATH\" && printf 'INHERITED:%s' \"$FIXTURE_VALUE\"",
+        "test -n \"$PATH\" && printf 'INHERITED:%s' \"$FIXTURE_VALUE\"; dd bs=1 count=1 of=/dev/null 2>/dev/null",
     ]))
     .size(Size::new(40, 3))
     .environment(Environment::inherit().var("FIXTURE_VALUE", "override"))
