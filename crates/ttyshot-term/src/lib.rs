@@ -9,6 +9,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -24,8 +25,9 @@ use alacritty_terminal::tty::{self, Shell};
 use alacritty_terminal::vte::ansi::{
     Color as AlacrittyColor, CursorShape as AlacrittyCursorShape, NamedColor, Rgb as AlacrittyRgb,
 };
-use nix::sys::signal::{Signal, killpg};
-use nix::unistd::Pid;
+use nix::errno::Errno;
+use nix::sys::signal::{Signal, kill, killpg};
+use nix::unistd::{Pid, getpgid};
 use regex::Regex;
 use ttyshot_core::{
     Attributes, Blink, CellWidth, Color, ColorRole, Cursor, CursorShape, Grid, Rgb, Style, Theme,
@@ -300,7 +302,7 @@ pub struct Session {
     terminal: Arc<FairMutex<Term<DriverEventProxy>>>,
     sender: EventLoopSender,
     control: Arc<Control>,
-    process_group: Pid,
+    cleanup: Arc<ProcessCleanup>,
     deadline: Instant,
     loop_thread: Option<JoinHandle<()>>,
     query_sender: Sender<QueryMessage>,
@@ -329,10 +331,12 @@ impl Session {
 
         let pty = tty::new(&options, size.window_size(), 0)
             .map_err(|error| DriverError::Spawn(error.to_string()))?;
-        let process_group = Pid::from_raw(
+        let child_pid = Pid::from_raw(
             i32::try_from(pty.child().id())
                 .map_err(|_| DriverError::Spawn("child PID does not fit i32".to_owned()))?,
         );
+        let cleanup = Arc::new(ProcessCleanup::new(child_pid));
+        wait_for_process_group(&cleanup, deadline)?;
 
         let control = Arc::new(Control::default());
         let sender_slot = Arc::new(Mutex::new(None));
@@ -389,16 +393,17 @@ impl Session {
             .map_err(|error| DriverError::Spawn(error.to_string()))?;
 
         let watchdog_control = Arc::clone(&control);
+        let watchdog_cleanup = Arc::clone(&cleanup);
         let watchdog_thread = thread::Builder::new()
             .name("ttyshot timeout".to_owned())
-            .spawn(move || watchdog(deadline, process_group, &watchdog_control))
+            .spawn(move || watchdog(deadline, &watchdog_cleanup, &watchdog_control))
             .map_err(|error| DriverError::Spawn(error.to_string()))?;
 
         Ok(Self {
             terminal,
             sender,
             control,
-            process_group,
+            cleanup,
             deadline,
             loop_thread: Some(loop_thread),
             query_sender,
@@ -635,7 +640,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        kill_process_group(self.process_group);
+        self.cleanup.kill();
         self.control.close();
         let _ = self.query_sender.send(QueryMessage::Shutdown);
         let _ = self.sender.send(Msg::Shutdown);
@@ -866,7 +871,79 @@ fn color_query_loop(
     }
 }
 
-fn watchdog(deadline: Instant, process_group: Pid, control: &Control) {
+struct ProcessCleanup {
+    child_pid: Pid,
+    group_ready: AtomicBool,
+    killed: AtomicBool,
+}
+
+impl ProcessCleanup {
+    fn new(child_pid: Pid) -> Self {
+        Self {
+            child_pid,
+            group_ready: AtomicBool::new(false),
+            killed: AtomicBool::new(false),
+        }
+    }
+
+    fn mark_group_ready(&self) {
+        self.group_ready.store(true, Ordering::Release);
+    }
+
+    fn kill(&self) {
+        if self.killed.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let group_result = killpg(self.child_pid, Signal::SIGKILL);
+        if !self.group_ready.load(Ordering::Acquire) && group_result == Err(Errno::ESRCH) {
+            let _ = kill(self.child_pid, Signal::SIGKILL);
+            // The child can win the setsid race between the first group probe
+            // and the direct kill. Retry the group after SIGKILL is pending.
+            let _ = killpg(self.child_pid, Signal::SIGKILL);
+        }
+    }
+}
+
+fn wait_for_process_group(cleanup: &ProcessCleanup, deadline: Instant) -> Result<(), DriverError> {
+    loop {
+        if Instant::now() >= deadline {
+            cleanup.kill();
+            return Err(DriverError::Spawn(
+                "session deadline expired before the child process group was ready".to_owned(),
+            ));
+        }
+
+        match getpgid(Some(cleanup.child_pid)) {
+            Ok(process_group) if process_group == cleanup.child_pid => {
+                cleanup.mark_group_ready();
+                if Instant::now() >= deadline {
+                    cleanup.kill();
+                    return Err(DriverError::Spawn(
+                        "session deadline expired before the child process group was ready"
+                            .to_owned(),
+                    ));
+                }
+                return Ok(());
+            }
+            Ok(_) => thread::yield_now(),
+            Err(Errno::ESRCH) => {
+                cleanup.kill();
+                return Err(DriverError::Spawn(
+                    "child exited before its process group was ready".to_owned(),
+                ));
+            }
+            Err(error) => {
+                cleanup.kill();
+                return Err(DriverError::Spawn(format!(
+                    "failed to inspect child process group: {error}"
+                )));
+            }
+        }
+    }
+}
+
+fn watchdog(deadline: Instant, cleanup: &ProcessCleanup, control: &Control) {
     let mut state = control
         .state
         .lock()
@@ -881,7 +958,7 @@ fn watchdog(deadline: Instant, process_group: Pid, control: &Control) {
             state.generation = state.generation.wrapping_add(1);
             control.condvar.notify_all();
             drop(state);
-            kill_process_group(process_group);
+            cleanup.kill();
             return;
         }
         let (new_state, _) = control
@@ -890,10 +967,6 @@ fn watchdog(deadline: Instant, process_group: Pid, control: &Control) {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state = new_state;
     }
-}
-
-fn kill_process_group(process_group: Pid) {
-    let _ = killpg(process_group, Signal::SIGKILL);
 }
 
 fn tty_options(command: Command, environment: Environment) -> tty::Options {
@@ -1315,6 +1388,59 @@ mod tests {
     }
 
     #[test]
+    fn pre_group_cleanup_falls_back_to_the_known_child_pid_and_is_idempotent() {
+        use std::process::Command as StdCommand;
+
+        let mut child = StdCommand::new("/bin/sh")
+            .args(["-c", "trap '' HUP; exec sleep 30"])
+            .spawn()
+            .unwrap();
+        let child_pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+        assert_ne!(getpgid(Some(child_pid)).unwrap(), child_pid);
+        let cleanup = ProcessCleanup::new(child_pid);
+
+        cleanup.kill();
+        cleanup.kill();
+        let status = child.wait().unwrap();
+
+        assert!(!status.success());
+        assert_eq!(kill(child_pid, None), Err(Errno::ESRCH));
+    }
+
+    #[test]
+    fn immediate_drop_stress_leaves_no_process_group() {
+        for _ in 0..16 {
+            let session =
+                shell_test_session("trap '' HUP; (trap '' HUP; sleep 30) & child=$!; wait $child");
+            let child_pid = session.cleanup.child_pid;
+
+            drop(session);
+
+            assert_process_and_group_gone(child_pid);
+        }
+    }
+
+    #[test]
+    fn tiny_hard_timeout_stress_leaves_no_process_group() {
+        for _ in 0..16 {
+            let session = shell_test_session_with_timeout(
+                "trap '' HUP; (trap '' HUP; sleep 30) & child=$!; printf READY; wait $child",
+                Duration::from_millis(100),
+            );
+            let child_pid = session.cleanup.child_pid;
+            session.wait_text("READY", Duration::from_secs(1)).unwrap();
+
+            let error = session
+                .wait_text("NEVER", Duration::from_secs(1))
+                .unwrap_err();
+            assert!(matches!(error, DriverError::Timeout { .. }), "{error}");
+            drop(session);
+
+            assert_process_and_group_gone(child_pid);
+        }
+    }
+
+    #[test]
     fn elapsed_deadline_beats_a_generation_change() {
         let control = Control::default();
         let generation = control.generation();
@@ -1423,6 +1549,10 @@ mod tests {
     }
 
     fn shell_test_session(script: &str) -> Session {
+        shell_test_session_with_timeout(script, Duration::from_secs(2))
+    }
+
+    fn shell_test_session_with_timeout(script: &str, timeout: Duration) -> Session {
         SessionBuilder::new(Command::new("/bin/sh").args(["-c", script]))
             .size(Size::new(40, 4))
             .environment(
@@ -1430,8 +1560,24 @@ mod tests {
                     .var("PATH", "/usr/bin:/bin")
                     .var("LC_ALL", "C"),
             )
-            .timeout(Duration::from_secs(2))
+            .timeout(timeout)
             .spawn()
             .unwrap()
+    }
+
+    fn assert_process_and_group_gone(child_pid: Pid) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if kill(child_pid, None) == Err(Errno::ESRCH)
+                && killpg(child_pid, None) == Err(Errno::ESRCH)
+            {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "process or process group {child_pid} survived cleanup"
+            );
+            thread::yield_now();
+        }
     }
 }
