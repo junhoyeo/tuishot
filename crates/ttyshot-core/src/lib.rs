@@ -4,7 +4,7 @@
 //! [`CellWidth::Wide`] cell followed by one [`CellWidth::Continuation`] cell.
 //! Renderers must never infer width again from the stored text.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use std::{error::Error, fmt};
 
 /// An RGB color with eight bits per channel.
@@ -364,7 +364,7 @@ pub struct CellRect {
 }
 
 /// A complete terminal frame.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Grid {
     columns: u16,
     rows: u16,
@@ -388,6 +388,27 @@ impl Grid {
             cells: vec![Cell::default(); usize::from(columns) * usize::from(rows)],
             cursor: None,
         })
+    }
+
+    /// Builds a grid from row-major cells after checking every invariant.
+    ///
+    /// # Errors
+    /// Returns a [`GridError`] for empty dimensions, an incorrect cell count,
+    /// malformed wide-cell pairs, or a cursor outside the grid.
+    pub fn from_cells(
+        columns: u16,
+        rows: u16,
+        cells: Vec<Cell>,
+        cursor: Option<Cursor>,
+    ) -> Result<Self, GridError> {
+        let grid = Self {
+            columns,
+            rows,
+            cells,
+            cursor,
+        };
+        grid.validate()?;
+        Ok(grid)
     }
 
     /// Returns the number of columns.
@@ -525,6 +546,60 @@ impl Grid {
         output
     }
 
+    fn validate(&self) -> Result<(), GridError> {
+        if self.columns == 0 || self.rows == 0 {
+            return Err(GridError::EmptyGrid);
+        }
+        let expected = usize::from(self.columns) * usize::from(self.rows);
+        if self.cells.len() != expected {
+            return Err(GridError::InvalidCellCount {
+                expected,
+                actual: self.cells.len(),
+            });
+        }
+        if let Some(cursor) = self.cursor
+            && (cursor.x >= self.columns || cursor.y >= self.rows)
+        {
+            return Err(GridError::InvalidCursor {
+                x: cursor.x,
+                y: cursor.y,
+            });
+        }
+
+        for y in 0..self.rows {
+            let row_start = usize::from(y) * usize::from(self.columns);
+            for x in 0..self.columns {
+                let index = row_start + usize::from(x);
+                let cell = &self.cells[index];
+                match cell.width {
+                    CellWidth::Single => {}
+                    CellWidth::Wide => {
+                        if x + 1 >= self.columns {
+                            return Err(GridError::MalformedWideCell { x, y });
+                        }
+                        let trailing = &self.cells[index + 1];
+                        if trailing.width != CellWidth::Continuation
+                            || !trailing.symbol.is_empty()
+                            || trailing.style != cell.style
+                        {
+                            return Err(GridError::MalformedWideCell { x, y });
+                        }
+                    }
+                    CellWidth::Continuation => {
+                        if !cell.symbol.is_empty()
+                            || x == 0
+                            || self.cells[index - 1].width != CellWidth::Wide
+                            || self.cells[index - 1].style != cell.style
+                        {
+                            return Err(GridError::MalformedWideCell { x, y });
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn index(&self, x: u16, y: u16) -> Option<usize> {
         (x < self.columns && y < self.rows)
             .then_some(usize::from(y) * usize::from(self.columns) + usize::from(x))
@@ -592,6 +667,27 @@ pub enum GridError {
     },
     /// Callers cannot write continuation cells directly.
     InvalidCellWidth,
+    /// The row-major cell count did not match the dimensions.
+    InvalidCellCount {
+        /// Required number of cells.
+        expected: usize,
+        /// Supplied number of cells.
+        actual: usize,
+    },
+    /// A wide/continuation pair was malformed.
+    MalformedWideCell {
+        /// Column of the malformed half.
+        x: u16,
+        /// Row of the malformed half.
+        y: u16,
+    },
+    /// The cursor position was outside the grid.
+    InvalidCursor {
+        /// Cursor column.
+        x: u16,
+        /// Cursor row.
+        y: u16,
+    },
     /// A crop was empty or outside the grid.
     InvalidRect(CellRect),
 }
@@ -607,12 +703,46 @@ impl fmt::Display for GridError {
             Self::InvalidCellWidth => {
                 formatter.write_str("continuation cells cannot be written directly")
             }
+            Self::InvalidCellCount { expected, actual } => write!(
+                formatter,
+                "grid dimensions require {expected} cells, but {actual} were supplied"
+            ),
+            Self::MalformedWideCell { x, y } => {
+                write!(formatter, "wide-cell invariant is broken at ({x}, {y})")
+            }
+            Self::InvalidCursor { x, y } => {
+                write!(formatter, "cursor ({x}, {y}) is outside the grid")
+            }
             Self::InvalidRect(rect) => write!(
                 formatter,
                 "cell crop {},{} {}x{} is empty or outside the grid",
                 rect.x, rect.y, rect.width, rect.height
             ),
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Grid {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct SerializedGrid {
+            columns: u16,
+            rows: u16,
+            cells: Vec<Cell>,
+            cursor: Option<Cursor>,
+        }
+
+        let serialized = SerializedGrid::deserialize(deserializer)?;
+        Self::from_cells(
+            serialized.columns,
+            serialized.rows,
+            serialized.cells,
+            serialized.cursor,
+        )
+        .map_err(de::Error::custom)
     }
 }
 
@@ -715,5 +845,41 @@ mod tests {
             theme.resolve(Color::Rgb(Rgb::new(1, 2, 3)), ColorRole::Foreground),
             Rgb::new(1, 2, 3)
         );
+    }
+
+    #[test]
+    fn deserialize_rejects_zero_dimensions_and_wrong_cell_count() {
+        let grid = Grid::new(2, 1).unwrap();
+        let mut zero = serde_json::to_value(&grid).unwrap();
+        zero["columns"] = serde_json::json!(0);
+        assert!(serde_json::from_value::<Grid>(zero).is_err());
+
+        let mut short = serde_json::to_value(&grid).unwrap();
+        short["cells"].as_array_mut().unwrap().pop();
+        assert!(serde_json::from_value::<Grid>(short).is_err());
+    }
+
+    #[test]
+    fn deserialize_rejects_malformed_wide_pairs_and_cursor() {
+        let mut grid = Grid::new(3, 1).unwrap();
+        grid.put(0, 0, "界", CellWidth::Wide, Style::default())
+            .unwrap();
+
+        let mut malformed = serde_json::to_value(&grid).unwrap();
+        malformed["cells"][1]["width"] = serde_json::json!("single");
+        assert!(serde_json::from_value::<Grid>(malformed).is_err());
+
+        grid.cursor = Some(Cursor {
+            x: 1,
+            y: 0,
+            shape: CursorShape::Block,
+            visible: true,
+        });
+        let encoded = serde_json::to_string(&grid).unwrap();
+        assert_eq!(serde_json::from_str::<Grid>(&encoded).unwrap(), grid);
+
+        let mut invalid_cursor: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        invalid_cursor["cursor"]["x"] = serde_json::json!(3);
+        assert!(serde_json::from_value::<Grid>(invalid_cursor).is_err());
     }
 }
