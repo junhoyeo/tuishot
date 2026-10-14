@@ -361,7 +361,7 @@ fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
 fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
     let pid_file = unique_pid_file("leader-exit");
     let script = format!(
-        "(trap '' HUP; sleep 30) & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
+        "(trap '' HUP TERM; exec tail -f /dev/null) & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
         pid_file.display()
     );
     let session = shell_session(&script, Size::new(50, 4), Duration::from_millis(250));
