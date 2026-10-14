@@ -910,6 +910,12 @@ impl ProcessCleanup {
     }
 }
 
+impl Drop for ProcessCleanup {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 fn wait_for_process_group(cleanup: &ProcessCleanup, deadline: Instant) -> Result<(), DriverError> {
     let mut group_ready = false;
     loop {
@@ -1491,6 +1497,24 @@ mod tests {
 
         cleanup.kill();
         cleanup.kill();
+        let status = child.wait().unwrap();
+
+        assert!(!status.success());
+        assert_eq!(kill(child_pid, None), Err(Errno::ESRCH));
+    }
+
+    #[test]
+    fn cleanup_drop_kills_a_pre_group_child() {
+        use std::process::Command as StdCommand;
+
+        let mut child = StdCommand::new("/bin/sh")
+            .args(["-c", "trap '' HUP; exec sleep 30"])
+            .spawn()
+            .unwrap();
+        let child_pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+        assert_ne!(getpgid(Some(child_pid)).unwrap(), child_pid);
+
+        drop(ProcessCleanup::new(child_pid));
         let status = child.wait().unwrap();
 
         assert!(!status.success());
