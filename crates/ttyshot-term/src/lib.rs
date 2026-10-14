@@ -2,6 +2,10 @@
 //!
 //! [`Session`] owns the child process group. Dropping a session or reaching its
 //! hard deadline kills the complete group, including descendants.
+//!
+//! Alacritty 0.26 does not preserve SGR blink (5/6), frame/encircle (51/52),
+//! overline (53), or ideogram decoration (60-64) in its public cell state.
+//! Captures therefore leave those shared-grid attributes at their defaults.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};

@@ -251,6 +251,14 @@ fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
         "\x1b[8mH\x1b[0m",
         "\x1b[9mS\x1b[0m",
         "\x1b[5mL\x1b[0m",
+        "\x1b[51mF\x1b[0m",
+        "\x1b[52mE\x1b[0m",
+        "\x1b[53mV\x1b[0m",
+        "\x1b[60m0\x1b[0m",
+        "\x1b[61m1\x1b[0m",
+        "\x1b[62m2\x1b[0m",
+        "\x1b[63m3\x1b[0m",
+        "\x1b[64m4\x1b[0m",
         "\x1b[38;2;1;2;3;48;5;4mX\x1b[0m界"
     );
     let session = shell_session(
@@ -259,7 +267,7 @@ fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
         Duration::from_secs(2),
     );
     let grid = session
-        .wait_text("BDIU2COARHSLX界", Duration::from_secs(1))
+        .wait_text("BDIU2COARHSLFEV01234X界", Duration::from_secs(1))
         .unwrap();
 
     assert!(grid.get(0, 0).unwrap().style.attributes.bold);
@@ -288,13 +296,27 @@ fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
     assert!(grid.get(8, 0).unwrap().style.attributes.reverse);
     assert!(grid.get(9, 0).unwrap().style.attributes.hidden);
     assert!(grid.get(10, 0).unwrap().style.attributes.strikethrough);
-    // Alacritty 0.26 exposes no cell flag for SGR 5/6; the ADR records this gap.
+
+    // Alacritty 0.26 exposes no public cell state for these SGR attributes.
     assert_eq!(
         grid.get(11, 0).unwrap().style.attributes.blink,
         ttyshot_term::core::Blink::None
     );
+    for column in [12, 13] {
+        assert_eq!(
+            grid.get(column, 0).unwrap().style.attributes.frame,
+            ttyshot_term::core::Frame::None
+        );
+    }
+    assert!(!grid.get(14, 0).unwrap().style.attributes.overline);
+    for column in 15..=19 {
+        assert_eq!(
+            grid.get(column, 0).unwrap().style.attributes.ideogram,
+            ttyshot_term::core::Ideogram::None
+        );
+    }
 
-    let styled = grid.get(12, 0).unwrap();
+    let styled = grid.get(20, 0).unwrap();
     assert_eq!(
         styled.style.foreground,
         ttyshot_term::core::Color::Rgb(ttyshot_term::core::Rgb::new(1, 2, 3))
@@ -304,11 +326,11 @@ fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
         ttyshot_term::core::Color::Indexed(4)
     );
     assert_eq!(
-        grid.get(13, 0).unwrap().width,
+        grid.get(21, 0).unwrap().width,
         ttyshot_term::core::CellWidth::Wide
     );
     assert_eq!(
-        grid.get(14, 0).unwrap().width,
+        grid.get(22, 0).unwrap().width,
         ttyshot_term::core::CellWidth::Continuation
     );
 }
