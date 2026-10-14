@@ -37,6 +37,7 @@ printf '\033]4;42;#070809\007'
 query "${esc}]4;42;rgb:0707/0808/0909$(printf '\007')" '\033]4;42;?\007'
 query "${esc}[?0u" '\033[?u'
 printf '\033[H\033[2JQUERY_OK'
+dd bs=1 count=1 of=/dev/null 2>/dev/null
 "#;
 
 fn clear_environment() -> Environment {
