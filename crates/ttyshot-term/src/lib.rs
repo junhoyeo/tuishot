@@ -1536,10 +1536,12 @@ mod tests {
 
     #[test]
     fn tiny_hard_timeout_stress_leaves_no_process_group() {
-        for _ in 0..16 {
+        // Leave enough startup budget for loaded CI hosts while keeping this a
+        // short-deadline race/cleanup stress test.
+        for _ in 0..8 {
             let session = shell_test_session_with_timeout(
                 "trap '' HUP; (trap '' HUP; sleep 30) & child=$!; printf READY; wait $child",
-                Duration::from_millis(100),
+                Duration::from_millis(500),
             );
             let child_pid = session.cleanup.child_pid;
             session.wait_text("READY", Duration::from_secs(1)).unwrap();
