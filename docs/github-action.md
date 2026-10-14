@@ -1,9 +1,9 @@
 # GitHub Action
 
-The ttyshot composite action runs a committed scene and opens a pull request only when selected screenshots change. The action is Linux-only while this repository is private.
+The ttyshot composite action runs a committed scene on Linux and opens a pull request only when selected screenshots change.
 
 > [!WARNING]
-> Pull requests, action logs, and terminal screenshots can become public. Use synthetic fixture data only. Never capture personal usage, home-directory paths, credentials, customer data, or other private terminal output. A ttyshot timeout can include the last terminal screen in its error.
+> Pull requests, action logs, and terminal screenshots can become public. Use synthetic fixture data only. Never capture personal usage, home-directory paths, credentials, customer data, or other sensitive terminal output. A ttyshot timeout can include the last terminal screen in its error.
 
 ## Consumer workflow
 

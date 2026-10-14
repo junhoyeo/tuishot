@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   screenshots:
-    # The action is Linux-only while the ttyshot repository is private.
+    # The v0 action currently supports Linux runners.
     runs-on: ubuntu-24.04
     steps:
       - name: Check out the base branch

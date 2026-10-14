@@ -1,10 +1,12 @@
+![ttyshot — exact terminal screenshots and a geometry comparison](docs/assets/hero/ttyshot-hero.png)
+
 # ttyshot
 
 **Screenshots of any TUI that look like a real terminal — and stay up to date.**
 
-`ttyshot` drives an interactive terminal program in a real PTY, waits for the screen you asked for, and renders the terminal cell grid to deterministic PNG, SVG, text, or JSON. Box drawing, blocks, Braille, sextants, octants, and Powerline separators use cell geometry instead of font glyphs, so charts and borders join without seams.
-
-> **Status:** v0.1 is in development. The repository stays private until the launch checklist is complete. No package has been published.
+- **Seam-free terminal graphics.** Boxes, blocks, Braille, sextants, octants, Powerline, and scrollbars use cell geometry.
+- **State-based capture.** Wait for text, regex, absence, or stability instead of guessing a sleep.
+- **One frame, four formats.** Export PNG, SVG, rectangular text, and styled JSON from the same grid.
 
 ## 30-second quick start
 
@@ -13,9 +15,22 @@ cargo install --git https://github.com/junhoyeo/ttyshot --locked
 ttyshot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
 ```
 
-The command runs at exactly `120x40`, waits until `Ready` is visible, writes `dashboard.png`, and terminates the complete child process group. Every wait has a deadline. A timeout names the failed condition and prints the last screen.
+The command runs at exactly `120x40`, waits for `Ready`, writes `dashboard.png`, and terminates the complete child process group. A timeout names the failed condition and prints the last screen.
 
-Prebuilt macOS and Linux archives are planned but not published. Target and verification details are in [`docs/distribution-plan.md`](docs/distribution-plan.md).
+## Gallery
+
+<table>
+  <tr>
+    <td width="50%"><strong>Tokscale</strong><br><sub>75 days of synthetic usage</sub><br><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered by ttyshot"></td>
+    <td width="50%"><strong>LazyGit</strong><br><sub>throwaway repository, no remotes</sub><br><img src="docs/assets/gallery/lazygit.png" alt="LazyGit showing a synthetic demo repository"></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Yazi</strong><br><sub>isolated demo directory</sub><br><img src="docs/assets/gallery/yazi.png" alt="Yazi showing neutral synthetic files"></td>
+    <td width="50%"><strong>Vim</strong><br><sub>read-only synthetic dashboard</sub><br><img src="docs/assets/gallery/vim.png" alt="Vim showing a synthetic terminal dashboard"></td>
+  </tr>
+</table>
+
+## Scripted scenes
 
 For a sequence with more than one frame:
 
@@ -56,6 +71,7 @@ panel = "Models by Cost"
 A shot can crop by a cell rectangle or by the title of a bordered panel. Commands can inherit or clear the environment, set exact `K=V` values, choose a working directory, and use an isolated home directory.
 
 See the validated v1 schema and key grammar in [`docs/scene-format.md`](docs/scene-format.md).
+
 
 ## What makes the output exact
 
@@ -139,7 +155,7 @@ jobs:
 
 Use fixture data in public images. Do not capture a developer's real home directory, account totals, paths, tokens, or model history.
 
-The implemented action inputs, trusted-ref model, and branch-safety contract are documented in [`docs/github-action.md`](docs/github-action.md). The launch design notes remain in [`docs/action-plan.md`](docs/action-plan.md).
+The implemented action inputs, trusted-ref model, and branch-safety contract are documented in [`docs/github-action.md`](docs/github-action.md).
 
 ## Coding-agent recipe
 
@@ -189,10 +205,6 @@ Checked against project documentation and source on 2026-10-15. “Different foc
 | [toque](https://github.com/joelgwebber/toque) | Headless Ratatui input, text frames, and SVG | Font-rendered block charts can show seams; ttyshot draws terminal graphics from cell geometry |
 | [ratasvg](https://github.com/sermuns/ratasvg) | Direct Ratatui-buffer-to-SVG conversion | ttyshot preserves cell backgrounds/attributes and also drives arbitrary PTY applications |
 | [Honeyshots](https://github.com/honeymux/honeyshots) | Component-level screenshots and named regions for OpenTUI/React | Targets OpenTUI rather than Ratatui or arbitrary terminal processes |
-
-## Gallery
-
-The launch gallery will use committed, synthetic fixtures for btop, lazygit, yazi, gitui, k9s, and Tokscale. The capture and review plan is in [`docs/gallery-plan.md`](docs/gallery-plan.md). No private usage data is used in repository images.
 
 ## License
 
