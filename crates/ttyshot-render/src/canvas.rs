@@ -6,7 +6,7 @@
 )]
 // Coordinates are clipped before conversion and alpha arithmetic is bounded to 0..=255.
 
-use crate::geometry::Shape;
+use crate::{RenderError, geometry::Shape};
 use ttyshot_core::Rgb;
 
 pub(crate) struct Canvas {
@@ -16,12 +16,19 @@ pub(crate) struct Canvas {
 }
 
 impl Canvas {
-    pub(crate) fn new(width: u32, height: u32) -> Self {
-        Self {
+    pub(crate) fn new(width: u32, height: u32) -> Result<Self, RenderError> {
+        let width_usize = usize::try_from(width).map_err(|_| RenderError::DimensionOverflow)?;
+        let height_usize = usize::try_from(height).map_err(|_| RenderError::DimensionOverflow)?;
+        let byte_len = width_usize
+            .checked_mul(height_usize)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(RenderError::DimensionOverflow)?;
+        let pixels = allocate_pixels(byte_len, width, height)?;
+        Ok(Self {
             width,
             height,
-            pixels: vec![0; width as usize * height as usize * 4],
-        }
+            pixels,
+        })
     }
 
     pub(crate) fn fill_rect(
@@ -126,15 +133,11 @@ impl Canvas {
         color: Rgb,
         alpha: u8,
         clip: (i32, i32, i32, i32),
-        bold: bool,
-        italic: bool,
+        bold_offset: i32,
+        italic_skew: i32,
     ) {
         for row in 0..height {
-            let skew = if italic {
-                ((height - row) as i32 * 3) / height.max(1) as i32
-            } else {
-                0
-            };
+            let skew = ((height - row) as i32 * italic_skew) / height.max(1) as i32;
             for column in 0..width {
                 let coverage = mask[row * width + column];
                 if coverage == 0 {
@@ -144,8 +147,10 @@ impl Canvas {
                 let py = y + row as i32;
                 if px >= clip.0 && py >= clip.1 && px < clip.2 && py < clip.3 {
                     self.blend(px, py, color, multiply_alpha(coverage, alpha));
-                    if bold && px + 1 < clip.2 {
-                        self.blend(px + 1, py, color, multiply_alpha(coverage, alpha));
+                    for offset in 1..=bold_offset {
+                        if px + offset < clip.2 {
+                            self.blend(px + offset, py, color, multiply_alpha(coverage, alpha));
+                        }
                     }
                 }
             }
@@ -246,6 +251,35 @@ impl Canvas {
     }
 }
 
+fn allocate_pixels(byte_len: usize, width: u32, height: u32) -> Result<Vec<u8>, RenderError> {
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(byte_len)
+        .map_err(|_| RenderError::AllocationFailed { width, height })?;
+    pixels.resize(byte_len, 0);
+    Ok(pixels)
+}
+
 const fn multiply_alpha(first: u8, second: u8) -> u8 {
     ((first as u16 * second as u16 + 127) / 255) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allocation_length_overflow_is_reported_without_panicking() {
+        assert!(matches!(
+            Canvas::new(u32::MAX, u32::MAX),
+            Err(RenderError::DimensionOverflow)
+        ));
+        assert!(matches!(
+            allocate_pixels(usize::MAX, 1, 1),
+            Err(RenderError::AllocationFailed {
+                width: 1,
+                height: 1
+            })
+        ));
+    }
 }

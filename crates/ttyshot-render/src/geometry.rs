@@ -1,4 +1,4 @@
-#![allow(clippy::items_after_test_module, clippy::manual_midpoint)]
+#![allow(clippy::items_after_test_module)]
 
 //! Integer procedural glyph geometry.
 
@@ -39,7 +39,7 @@ pub(crate) fn shapes(character: char, width: i32, height: i32) -> Option<Vec<Sha
             width,
             height,
         )),
-        0xe0b0..=0xe0b5 => Some(powerline_shapes(character, width, height)),
+        0xe0b0..=0xe0b7 => Some(powerline_shapes(character, width, height)),
         _ => None,
     }
 }
@@ -292,7 +292,7 @@ fn braille_shapes(character: char, width: i32, height: i32) -> Vec<Shape> {
     let mut result = Vec::new();
     for (bit, (column, row)) in dot_map.into_iter().enumerate() {
         if bits & (1 << bit) != 0 {
-            let x = (column * width + width / 2) / 2 - dot_width / 2;
+            let x = column * (width / 2) + width / 4 - dot_width / 2;
             let y = (row * height + height / 2) / 4 - dot_height / 2;
             result.push(rect(x, y, dot_width, dot_height));
         }
@@ -319,46 +319,62 @@ fn grid_shapes(mask: u8, columns: i32, rows: i32, width: i32, height: i32) -> Ve
 
 fn powerline_shapes(character: char, width: i32, height: i32) -> Vec<Shape> {
     let middle = height / 2;
+    let stroke = (width / 8).max(1);
     match character as u32 {
-        0xe0b0 | 0xe0b4 => vec![Shape::Polygon(vec![(0, 0), (width, middle), (0, height)])],
-        0xe0b2 | 0xe0b5 => vec![Shape::Polygon(vec![
+        // Hard separators are filled arrowheads.
+        0xe0b0 => vec![Shape::Polygon(vec![(0, 0), (width, middle), (0, height)])],
+        0xe0b2 => vec![Shape::Polygon(vec![
             (width, 0),
             (0, middle),
             (width, height),
         ])],
-        0xe0b1 => vec![
-            Shape::Line {
-                x1: 0,
-                y1: 0,
-                x2: width - 1,
-                y2: middle,
-                width: (width / 8).max(1),
-            },
-            Shape::Line {
-                x1: width - 1,
-                y1: middle,
-                x2: 0,
-                y2: height - 1,
-                width: (width / 8).max(1),
-            },
-        ],
-        _ => vec![
-            Shape::Line {
-                x1: width - 1,
-                y1: 0,
-                x2: 0,
-                y2: middle,
-                width: (width / 8).max(1),
-            },
-            Shape::Line {
-                x1: 0,
-                y1: middle,
-                x2: width - 1,
-                y2: height - 1,
-                width: (width / 8).max(1),
-            },
-        ],
+        // Soft separators are open chevrons.
+        0xe0b1 => polyline(&[(0, 0), (width - 1, middle), (0, height - 1)], stroke),
+        0xe0b3 => polyline(
+            &[(width - 1, 0), (0, middle), (width - 1, height - 1)],
+            stroke,
+        ),
+        // The Powerline extra symbols are rounded half circles, not aliases of
+        // the hard triangle separators. Thick variants are filled; thin
+        // variants trace the same curve with a scale-safe stroke.
+        0xe0b4 => vec![Shape::Polygon(right_half_circle(width, height))],
+        0xe0b5 => polyline(&right_half_circle(width - 1, height), stroke),
+        0xe0b6 => vec![Shape::Polygon(left_half_circle(width, height))],
+        0xe0b7 => polyline(&left_half_circle(width - 1, height), stroke),
+        _ => unreachable!("powerline range is checked by shapes"),
     }
+}
+
+fn polyline(points: &[(i32, i32)], width: i32) -> Vec<Shape> {
+    points
+        .windows(2)
+        .map(|pair| Shape::Line {
+            x1: pair[0].0,
+            y1: pair[0].1,
+            x2: pair[1].0,
+            y2: pair[1].1,
+            width,
+        })
+        .collect()
+}
+
+fn right_half_circle(width: i32, height: i32) -> Vec<(i32, i32)> {
+    vec![
+        (0, 0),
+        (width / 2, height / 16),
+        (3 * width / 4, height / 4),
+        (width, height / 2),
+        (3 * width / 4, 3 * height / 4),
+        (width / 2, 15 * height / 16),
+        (0, height),
+    ]
+}
+
+fn left_half_circle(width: i32, height: i32) -> Vec<(i32, i32)> {
+    right_half_circle(width, height)
+        .into_iter()
+        .map(|(x, y)| (width - x, y))
+        .collect()
 }
 
 const fn ceil_fraction(value: i32, numerator: i32, denominator: i32) -> i32 {
@@ -395,7 +411,7 @@ mod tests {
             (0x2800, 0x28ff),
             (0x1fb00, 0x1fb3b),
             (0x1cd00, 0x1cde5),
-            (0xe0b0, 0xe0b5),
+            (0xe0b0, 0xe0b7),
         ];
         for (start, end) in ranges {
             for code in start..=end {

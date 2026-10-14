@@ -1,0 +1,10 @@
+# Bundled non-Rust assets. Rust dependencies are audited separately by cargo-deny.
+[[font]]
+file = "JetBrainsMono-Regular.ttf"
+family = "JetBrains Mono"
+style = "Regular"
+version = "2.304"
+license = "OFL-1.1"
+license_file = "OFL-JetBrainsMono.txt"
+source = "https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304"
+sha256 = "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f"

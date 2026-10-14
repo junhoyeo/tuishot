@@ -4,7 +4,6 @@
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
     clippy::items_after_statements,
-    clippy::manual_midpoint,
     clippy::semicolon_if_nothing_returned,
     clippy::too_many_arguments
 )]
@@ -21,22 +20,45 @@
 //! font when a fixture needs stable non-ASCII glyph coverage.
 
 mod canvas;
+mod font;
 mod geometry;
+mod svg_glyph;
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use canvas::Canvas;
-use fontdue::{Font, FontSettings};
+use font::LoadedFont;
 use geometry::Shape;
-use std::{error::Error, fmt, fs, path::PathBuf};
+use std::{error::Error, fmt, path::PathBuf};
+use svg_glyph::{SvgGlyphCatalog, select_font};
 use ttyshot_core::{
     Attributes, CellWidth, ColorRole, CursorShape, Frame, Grid, Ideogram, Rgb, Theme, Underline,
 };
 
+pub use font::{FontMode, FontSource};
 pub use ttyshot_core as core;
 
 const FONT_BYTES: &[u8] = include_bytes!("../assets/JetBrainsMono-Regular.ttf");
 /// Exact SIL Open Font License text shipped with the bundled font.
 pub const BUNDLED_FONT_LICENSE: &str = include_str!("../assets/OFL-JetBrainsMono.txt");
+/// Machine-readable provenance for all bundled non-Rust font assets.
+pub const BUNDLED_FONT_MANIFEST: &str = include_str!("../assets/FONT-LICENSES.toml");
+/// `JetBrains Mono` version bundled for deterministic output.
+pub const BUNDLED_FONT_VERSION: &str = "2.304";
+/// SHA-256 of the exact bundled `JetBrainsMono-Regular.ttf` bytes.
+pub const BUNDLED_FONT_SHA256: &str =
+    "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f";
+/// Upstream release containing the bundled font.
+pub const BUNDLED_FONT_SOURCE: &str =
+    "https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304";
+
+/// Maximum width or height accepted by the raster renderer.
+///
+/// The ceiling bounds coordinate conversion and rejects unreasonable canvases
+/// before allocation. SVG uses the same layout ceiling for parity with PNG.
+pub const MAX_CANVAS_DIMENSION: u32 = 32_768;
+/// Maximum accepted canvas area (64 Mi pixels, or 256 MiB of RGBA storage).
+pub const MAX_CANVAS_PIXELS: u64 = 64 * 1024 * 1024;
+/// Maximum logical font size. At the maximum 4x scale this limits a glyph raster to 2,048 px.
+pub const MAX_FONT_SIZE: f32 = 512.0;
 
 /// Insets around the terminal grid, in logical pixels.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,8 +121,12 @@ pub struct RenderOptions {
     pub chrome: WindowChrome,
     /// Add a deterministic soft window shadow and transparent outer margin.
     pub shadow: bool,
-    /// Optional font file used when the bundled font has no glyph, commonly CJK.
-    pub cjk_fallback: Option<PathBuf>,
+    /// Disable platform discovery for byte-stable fixtures and goldens.
+    pub font_mode: FontMode,
+    /// Optional primary font file. The bundled font is used when absent.
+    pub font: Option<FontSource>,
+    /// Ordered user-supplied fallback fonts, before any system fallback.
+    pub fallback_fonts: Vec<FontSource>,
 }
 
 impl Default for RenderOptions {
@@ -114,7 +140,9 @@ impl Default for RenderOptions {
             padding: Padding::default(),
             chrome: WindowChrome::None,
             shadow: false,
-            cjk_fallback: None,
+            font_mode: FontMode::System,
+            font: None,
+            fallback_fonts: Vec::new(),
         }
     }
 }
@@ -122,44 +150,46 @@ impl Default for RenderOptions {
 /// A validated renderer with parsed fonts.
 pub struct Renderer {
     options: RenderOptions,
-    primary_font: Font,
-    fallback_font: Option<Font>,
-    fallback_bytes: Option<Vec<u8>>,
+    fonts: Vec<LoadedFont>,
 }
 
 impl Renderer {
     /// Loads fonts and validates an option set.
     ///
     /// # Errors
-    /// Returns an error for zero dimensions, an unsupported scale, or an
-    /// unreadable/invalid fallback font.
+    /// Returns an error for zero dimensions, a non-finite or excessive font
+    /// size, an unsupported scale, or an unreadable/invalid fallback font.
     pub fn new(options: RenderOptions) -> Result<Self, RenderError> {
         if options.cell_width == 0
             || options.cell_height == 0
             || options.font_size <= 0.0
             || !options.font_size.is_finite()
+            || options.font_size > MAX_FONT_SIZE
         {
             return Err(RenderError::InvalidOptions(
-                "cell and font sizes must be finite and positive",
+                "cell sizes must be positive and font size must be finite and at most 512",
             ));
         }
         if options.scale == 0 || options.scale > 4 {
             return Err(RenderError::InvalidOptions("scale must be between 1 and 4"));
         }
-        let primary_font = Font::from_bytes(FONT_BYTES, FontSettings::default())
-            .map_err(RenderError::InvalidBundledFont)?;
-        let fallback_bytes = options.cjk_fallback.as_ref().map(fs::read).transpose()?;
-        let fallback_font = fallback_bytes
-            .as_ref()
-            .map(|bytes| Font::from_bytes(bytes.as_slice(), FontSettings::default()))
-            .transpose()
-            .map_err(RenderError::InvalidFallbackFont)?;
-        Ok(Self {
-            options,
-            primary_font,
-            fallback_font,
-            fallback_bytes,
-        })
+        let mut fonts = Vec::new();
+        if let Some(source) = &options.font {
+            fonts.push(LoadedFont::from_source(source)?);
+        } else {
+            fonts.push(LoadedFont::load(
+                std::sync::Arc::new(FONT_BYTES.to_vec()),
+                0,
+                "bundled JetBrains Mono 2.304".to_owned(),
+            )?);
+        }
+        for source in &options.fallback_fonts {
+            fonts.push(LoadedFont::from_source(source)?);
+        }
+        if options.font_mode == FontMode::System {
+            fonts.extend(font::system_fallbacks());
+        }
+        Ok(Self { options, fonts })
     }
 
     /// Returns this renderer's options.
@@ -168,13 +198,19 @@ impl Renderer {
         &self.options
     }
 
+    /// Reports the selected font source for a character.
+    #[must_use]
+    pub fn font_source_for(&self, character: char) -> &str {
+        &self.fonts[select_font(&self.fonts, character)].source
+    }
+
     /// Renders a grid as deterministic RGBA PNG bytes.
     ///
     /// # Errors
     /// Returns an error when dimensions overflow or PNG encoding fails.
     pub fn render_png(&self, grid: &Grid) -> Result<Vec<u8>, RenderError> {
         let layout = self.layout(grid)?;
-        let mut canvas = Canvas::new(layout.width, layout.height);
+        let mut canvas = Canvas::new(layout.width, layout.height)?;
         self.paint_shell(&mut canvas, layout);
         self.paint_cells(&mut canvas, grid, layout);
         self.paint_cursor(&mut canvas, grid, layout);
@@ -183,8 +219,9 @@ impl Renderer {
 
     /// Renders a grid as a deterministic standalone SVG document.
     ///
-    /// Procedural glyphs remain vector geometry. Text uses an embedded copy of
-    /// the same OFL font used by the PNG renderer.
+    /// Procedural glyphs remain vector geometry. Text references reusable
+    /// outline paths selected from the same font chain as the PNG renderer;
+    /// complete font files are never embedded.
     ///
     /// # Errors
     /// Returns an error when output dimensions overflow.
@@ -193,13 +230,11 @@ impl Renderer {
         let mut svg = String::new();
         use fmt::Write as _;
         write!(svg, r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#, layout.width, layout.height, layout.width, layout.height).unwrap();
-        write!(svg, "<defs><style>@font-face{{font-family:ttyshot;src:url(data:font/ttf;base64,{}) format('truetype')}}", STANDARD.encode(FONT_BYTES)).unwrap();
-        if let Some(bytes) = &self.fallback_bytes {
-            write!(svg, "@font-face{{font-family:ttyshot-fallback;src:url(data:font/ttf;base64,{}) format('truetype')}}", STANDARD.encode(bytes)).unwrap();
-        }
-        svg.push_str("</style></defs>");
+        let glyphs = SvgGlyphCatalog::build(grid, &self.fonts);
+        svg.push_str(glyphs.definitions());
         self.svg_shell(&mut svg, layout);
-        self.svg_cells(&mut svg, grid, layout);
+        self.svg_backgrounds(&mut svg, grid, layout);
+        self.svg_cells(&mut svg, grid, layout, &glyphs);
         self.svg_cursor(&mut svg, grid, layout);
         svg.push_str("</svg>");
         Ok(svg)
@@ -219,23 +254,36 @@ impl Renderer {
             0
         };
         let shadow = if self.options.shadow { 16 * scale } else { 0 };
+        let horizontal_padding = u32::from(self.options.padding.left)
+            .checked_add(u32::from(self.options.padding.right))
+            .and_then(|value| value.checked_mul(scale))
+            .ok_or(RenderError::DimensionOverflow)?;
+        let vertical_padding = u32::from(self.options.padding.top)
+            .checked_add(u32::from(self.options.padding.bottom))
+            .and_then(|value| value.checked_mul(scale))
+            .ok_or(RenderError::DimensionOverflow)?;
+        let grid_x = shadow
+            .checked_add(
+                u32::from(self.options.padding.left)
+                    .checked_mul(scale)
+                    .ok_or(RenderError::DimensionOverflow)?,
+            )
+            .ok_or(RenderError::DimensionOverflow)?;
+        let grid_y = shadow
+            .checked_add(chrome)
+            .and_then(|value| {
+                u32::from(self.options.padding.top)
+                    .checked_mul(scale)
+                    .and_then(|padding| value.checked_add(padding))
+            })
+            .ok_or(RenderError::DimensionOverflow)?;
         let surface_width = u32::from(grid.columns())
             .checked_mul(cell_width)
-            .and_then(|value| {
-                value.checked_add(
-                    (u32::from(self.options.padding.left) + u32::from(self.options.padding.right))
-                        * scale,
-                )
-            })
+            .and_then(|value| value.checked_add(horizontal_padding))
             .ok_or(RenderError::DimensionOverflow)?;
         let surface_height = u32::from(grid.rows())
             .checked_mul(cell_height)
-            .and_then(|value| {
-                value.checked_add(
-                    (u32::from(self.options.padding.top) + u32::from(self.options.padding.bottom))
-                        * scale,
-                )
-            })
+            .and_then(|value| value.checked_add(vertical_padding))
             .and_then(|value| value.checked_add(chrome))
             .ok_or(RenderError::DimensionOverflow)?;
         let width = surface_width
@@ -244,8 +292,14 @@ impl Renderer {
         let height = surface_height
             .checked_add(shadow * 2)
             .ok_or(RenderError::DimensionOverflow)?;
-        if width > i32::MAX as u32 || height > i32::MAX as u32 {
-            return Err(RenderError::DimensionOverflow);
+        let pixels = u64::from(width)
+            .checked_mul(u64::from(height))
+            .ok_or(RenderError::DimensionOverflow)?;
+        if width > MAX_CANVAS_DIMENSION
+            || height > MAX_CANVAS_DIMENSION
+            || pixels > MAX_CANVAS_PIXELS
+        {
+            return Err(RenderError::CanvasTooLarge { width, height });
         }
         Ok(Layout {
             width,
@@ -254,8 +308,8 @@ impl Renderer {
             surface_y: shadow,
             surface_width,
             surface_height,
-            grid_x: shadow + u32::from(self.options.padding.left) * scale,
-            grid_y: shadow + chrome + u32::from(self.options.padding.top) * scale,
+            grid_x,
+            grid_y,
             cell_width,
             cell_height,
             chrome,
@@ -264,11 +318,13 @@ impl Renderer {
 
     fn paint_shell(&self, canvas: &mut Canvas, layout: Layout) {
         if self.options.shadow {
-            for spread in (2..=12).rev() {
-                let alpha = u8::try_from(3 + (12 - spread)).unwrap_or(3);
+            let scale = i32::from(self.options.scale);
+            for logical_spread in (2..=12).rev() {
+                let spread = logical_spread * scale;
+                let alpha = u8::try_from(3 + (12 - logical_spread)).unwrap_or(3);
                 canvas.fill_rect(
                     layout.surface_x as i32 - spread,
-                    layout.surface_y as i32 + 4 - spread,
+                    layout.surface_y as i32 + 4 * scale - spread,
                     layout.surface_width as i32 + spread * 2,
                     layout.surface_height as i32 + spread * 2,
                     Rgb::new(0, 0, 0),
@@ -325,10 +381,12 @@ impl Renderer {
     }
 
     fn paint_cells(&self, canvas: &mut Canvas, grid: &Grid, layout: Layout) {
+        // Paint every background before any foreground. A continuation cell
+        // must never erase the second half of a wide glyph.
         for y in 0..grid.rows() {
             for x in 0..grid.columns() {
                 let cell = grid.get(x, y).expect("coordinates come from grid bounds");
-                let (foreground, background) = colors(&self.options.theme, cell.style);
+                let (_, background) = colors(&self.options.theme, cell.style);
                 let px = layout.grid_x + u32::from(x) * layout.cell_width;
                 let py = layout.grid_y + u32::from(y) * layout.cell_height;
                 canvas.fill_rect(
@@ -339,6 +397,14 @@ impl Renderer {
                     background,
                     255,
                 );
+            }
+        }
+        for y in 0..grid.rows() {
+            for x in 0..grid.columns() {
+                let cell = grid.get(x, y).expect("coordinates come from grid bounds");
+                let (foreground, _) = colors(&self.options.theme, cell.style);
+                let px = layout.grid_x + u32::from(x) * layout.cell_width;
+                let py = layout.grid_y + u32::from(y) * layout.cell_height;
                 if cell.width == CellWidth::Continuation {
                     continue;
                 }
@@ -414,36 +480,34 @@ impl Renderer {
             .chars()
             .filter(|character| *character != '\u{200d}' && *character != '\u{fe0f}')
         {
-            let font = self.font_for(character);
-            let (metrics, bitmap) = font.rasterize(character, size);
+            let font = &self.fonts[select_font(&self.fonts, character)];
+            let glyph = font.rasterize(character, size);
             let center = x as f32 + width as f32 / 2.0;
-            let draw_x = (center - metrics.advance_width / 2.0).round() as i32 + metrics.xmin;
-            let baseline = y as i32 + ((height as f32 + size) / 2.0).round() as i32
+            let draw_x = (center - glyph.advance_width / 2.0).round() as i32 + glyph.xmin;
+            let baseline = y as i32 + (height as f32 / 2.0 + size / 2.0).round() as i32
                 - i32::from(self.options.scale);
-            let draw_y = baseline - metrics.height as i32 - metrics.ymin;
+            let draw_y = baseline - glyph.height as i32 - glyph.ymin;
             canvas.mask(
                 draw_x,
                 draw_y,
-                metrics.width,
-                metrics.height,
-                &bitmap,
+                glyph.width,
+                glyph.height,
+                &glyph.bitmap,
                 color,
                 alpha,
                 (x as i32, y as i32, (x + width) as i32, (y + height) as i32),
-                attributes.bold,
-                attributes.italic,
+                if attributes.bold {
+                    i32::from(self.options.scale)
+                } else {
+                    0
+                },
+                if attributes.italic {
+                    3 * i32::from(self.options.scale)
+                } else {
+                    0
+                },
             );
         }
-    }
-
-    fn font_for(&self, character: char) -> &Font {
-        if self.primary_font.lookup_glyph_index(character) != 0 {
-            return &self.primary_font;
-        }
-        self.fallback_font
-            .as_ref()
-            .filter(|font| font.lookup_glyph_index(character) != 0)
-            .unwrap_or(&self.primary_font)
     }
 
     fn paint_decorations(
@@ -476,8 +540,9 @@ impl Renderer {
                 canvas.fill_rect(x, y + height - 2 * scale, width, scale, underline, 255);
             }
             Underline::Curly => {
-                for offset in 0..width {
-                    let wave = if (offset / (2 * scale)).rem_euclid(2) == 0 {
+                let run = 2 * scale;
+                for offset in (0..width).step_by(run as usize) {
+                    let wave = if (offset / run).rem_euclid(2) == 0 {
                         0
                     } else {
                         scale
@@ -485,7 +550,7 @@ impl Renderer {
                     canvas.fill_rect(
                         x + offset,
                         y + height - 3 * scale + wave,
-                        1,
+                        run.min(width - offset),
                         scale,
                         underline,
                         255,
@@ -598,15 +663,21 @@ impl Renderer {
     fn svg_shell(&self, svg: &mut String, layout: Layout) {
         use fmt::Write as _;
         if self.options.shadow {
-            write!(
-                svg,
-                r##"<rect x="{}" y="{}" width="{}" height="{}" fill="#000" opacity=".18"/>"##,
-                layout.surface_x + 5,
-                layout.surface_y + 8,
-                layout.surface_width,
-                layout.surface_height
-            )
-            .unwrap();
+            let scale = i32::from(self.options.scale);
+            for logical_spread in (2..=12).rev() {
+                let spread = logical_spread * scale;
+                let alpha = u8::try_from(3 + (12 - logical_spread)).unwrap_or(3);
+                write!(
+                    svg,
+                    r##"<rect x="{}" y="{}" width="{}" height="{}" fill="#000" opacity="{:.4}"/>"##,
+                    layout.surface_x as i32 - spread,
+                    layout.surface_y as i32 + 4 * scale - spread,
+                    layout.surface_width as i32 + spread * 2,
+                    layout.surface_height as i32 + spread * 2,
+                    f32::from(alpha) / 255.0,
+                )
+                .unwrap();
+            }
         }
         svg_rect(
             svg,
@@ -657,22 +728,44 @@ impl Renderer {
         }
     }
 
-    fn svg_cells(&self, svg: &mut String, grid: &Grid, layout: Layout) {
+    fn svg_backgrounds(&self, svg: &mut String, grid: &Grid, layout: Layout) {
+        for y in 0..grid.rows() {
+            let mut x = 0;
+            while x < grid.columns() {
+                let cell = grid.get(x, y).expect("coordinates come from grid bounds");
+                let (_, background) = colors(&self.options.theme, cell.style);
+                let start = x;
+                x += 1;
+                while x < grid.columns() {
+                    let next = grid.get(x, y).expect("coordinates come from grid bounds");
+                    let (_, next_background) = colors(&self.options.theme, next.style);
+                    if next_background != background {
+                        break;
+                    }
+                    x += 1;
+                }
+                if background != self.options.theme.background {
+                    svg_rect(
+                        svg,
+                        (layout.grid_x + u32::from(start) * layout.cell_width) as i32,
+                        (layout.grid_y + u32::from(y) * layout.cell_height) as i32,
+                        (u32::from(x - start) * layout.cell_width) as i32,
+                        layout.cell_height as i32,
+                        background,
+                        None,
+                    );
+                }
+            }
+        }
+    }
+
+    fn svg_cells(&self, svg: &mut String, grid: &Grid, layout: Layout, glyphs: &SvgGlyphCatalog) {
         for y in 0..grid.rows() {
             for x in 0..grid.columns() {
                 let cell = grid.get(x, y).expect("coordinates come from grid bounds");
-                let (foreground, background) = colors(&self.options.theme, cell.style);
+                let (foreground, _) = colors(&self.options.theme, cell.style);
                 let px = layout.grid_x + u32::from(x) * layout.cell_width;
                 let py = layout.grid_y + u32::from(y) * layout.cell_height;
-                svg_rect(
-                    svg,
-                    px as i32,
-                    py as i32,
-                    layout.cell_width as i32,
-                    layout.cell_height as i32,
-                    background,
-                    None,
-                );
                 if cell.width == CellWidth::Continuation {
                     continue;
                 }
@@ -708,6 +801,7 @@ impl Renderer {
                                 layout.cell_height,
                                 foreground,
                                 attributes,
+                                glyphs,
                             );
                         }
                     } else {
@@ -720,6 +814,7 @@ impl Renderer {
                             layout.cell_height,
                             foreground,
                             attributes,
+                            glyphs,
                         );
                     }
                     self.svg_decorations(
@@ -747,29 +842,60 @@ impl Renderer {
         height: u32,
         color: Rgb,
         attributes: Attributes,
+        glyphs: &SvgGlyphCatalog,
     ) {
         use fmt::Write as _;
         let size = self.options.font_size * f32::from(self.options.scale);
         let center = x as f32 + width as f32 / 2.0;
-        let baseline = y as f32 + (height as f32 + size) / 2.0 - f32::from(self.options.scale);
-        let clip_id = format!("cell-{x}-{y}");
+        let baseline = y as f32 + height as f32 / 2.0 + size / 2.0 - f32::from(self.options.scale);
+        let mut body = String::new();
+        for character in text
+            .chars()
+            .filter(|character| !matches!(*character, '\u{200d}' | '\u{fe0f}'))
+        {
+            let font_index = select_font(&self.fonts, character);
+            let font = &self.fonts[font_index];
+            let metrics = font.glyph_metrics(character, size);
+            let Some(id) = glyphs.id(font_index, metrics.glyph) else {
+                continue;
+            };
+            let origin_x = center - metrics.advance_width / 2.0;
+            let shear = if attributes.italic {
+                metrics.font_scale * 0.18
+            } else {
+                0.0
+            };
+            write!(body, r##"<use href="#{id}" transform="matrix({} 0 {shear} {} {origin_x} {baseline})"/>"##, metrics.font_scale, -metrics.font_scale).unwrap();
+            if attributes.bold {
+                write!(
+                    body,
+                    r##"<use href="#{id}" transform="matrix({} 0 {shear} {} {} {baseline})"/>"##,
+                    metrics.font_scale,
+                    -metrics.font_scale,
+                    origin_x + f32::from(self.options.scale)
+                )
+                .unwrap();
+            }
+        }
+        if body.is_empty() {
+            return;
+        }
         write!(
             svg,
-            r#"<clipPath id="{clip_id}"><rect x="{x}" y="{y}" width="{width}" height="{height}"/></clipPath>"#,
-        )
-        .unwrap();
-        write!(
-            svg,
-            r#"<text x="{center}" y="{baseline}" text-anchor="middle" font-family="ttyshot,ttyshot-fallback" font-size="{size}" fill="{}" clip-path="url(#{clip_id})"{}{}{}>{}</text>"#,
+            r#"<svg x="{x}" y="{y}" width="{width}" height="{height}" viewBox="{x} {y} {width} {height}" overflow="hidden"><g fill="{}"{}>"#,
             color.to_hex(),
-            if attributes.bold { " font-weight=\"700\"" } else { "" },
-            if attributes.italic { " font-style=\"italic\"" } else { "" },
-            if attributes.dim { " opacity=\".6\"" } else { "" },
-            escape_xml(text)
+            if attributes.dim {
+                " opacity=\".6\""
+            } else {
+                ""
+            }
         )
         .unwrap();
+        svg.push_str(&body);
+        svg.push_str("</g></svg>");
     }
 
+    #[allow(clippy::too_many_lines)] // Each SGR decoration has distinct SVG geometry.
     fn svg_decorations(
         &self,
         svg: &mut String,
@@ -822,8 +948,23 @@ impl Renderer {
                 );
             }
             Underline::Curly => {
-                use fmt::Write as _;
-                write!(svg, r#"<path d="M{x} {} q {} {} {} 0 t {} 0" fill="none" stroke="{}" stroke-width="{}"/>"#, y + height - 2 * scale, 2 * scale, -2 * scale, 4 * scale, width - 4 * scale, underline.to_hex(), scale).unwrap();
+                let run = 2 * scale;
+                for offset in (0..width).step_by(run as usize) {
+                    let wave = if (offset / run).rem_euclid(2) == 0 {
+                        0
+                    } else {
+                        scale
+                    };
+                    svg_rect(
+                        svg,
+                        x + offset,
+                        y + height - 3 * scale + wave,
+                        run.min(width - offset),
+                        scale,
+                        underline,
+                        None,
+                    );
+                }
             }
             Underline::Dotted | Underline::Dashed => {
                 use fmt::Write as _;
@@ -942,14 +1083,36 @@ struct Layout {
 pub enum RenderError {
     /// An option is outside its supported range.
     InvalidOptions(&'static str),
-    /// The bundled font could not be parsed. This indicates corrupt package data.
-    InvalidBundledFont(&'static str),
-    /// The configured fallback font could not be parsed.
-    InvalidFallbackFont(&'static str),
-    /// Reading a configured fallback font failed.
-    Io(std::io::Error),
-    /// Output dimensions exceeded the supported integer range.
+    /// A bundled, configured, or discovered font could not be parsed.
+    InvalidFont {
+        /// Font path or bundled-font description.
+        source: String,
+        /// Parser error.
+        message: &'static str,
+    },
+    /// Reading a configured font failed.
+    FontIo {
+        /// Requested path.
+        path: PathBuf,
+        /// File-system error.
+        error: std::io::Error,
+    },
+    /// Output dimension arithmetic overflowed.
     DimensionOverflow,
+    /// The validated image exceeds the renderer safety cap.
+    CanvasTooLarge {
+        /// Requested pixel width.
+        width: u32,
+        /// Requested pixel height.
+        height: u32,
+    },
+    /// The pixel buffer could not be allocated.
+    AllocationFailed {
+        /// Requested pixel width.
+        width: u32,
+        /// Requested pixel height.
+        height: u32,
+    },
     /// PNG encoding failed.
     Png(png::EncodingError),
 }
@@ -958,14 +1121,21 @@ impl fmt::Display for RenderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidOptions(message) => write!(formatter, "invalid render options: {message}"),
-            Self::InvalidBundledFont(message) => {
-                write!(formatter, "bundled font is invalid: {message}")
+            Self::InvalidFont { source, message } => {
+                write!(formatter, "font {source} is invalid: {message}")
             }
-            Self::InvalidFallbackFont(message) => {
-                write!(formatter, "fallback font is invalid: {message}")
+            Self::FontIo { path, error } => {
+                write!(formatter, "could not read font {}: {error}", path.display())
             }
-            Self::Io(error) => write!(formatter, "could not read fallback font: {error}"),
             Self::DimensionOverflow => formatter.write_str("rendered image dimensions overflowed"),
+            Self::CanvasTooLarge { width, height } => write!(
+                formatter,
+                "rendered image {width}x{height} exceeds the canvas safety limit"
+            ),
+            Self::AllocationFailed { width, height } => write!(
+                formatter,
+                "could not allocate the {width}x{height} pixel canvas"
+            ),
             Self::Png(error) => write!(formatter, "PNG encoding failed: {error}"),
         }
     }
@@ -973,15 +1143,10 @@ impl fmt::Display for RenderError {
 impl Error for RenderError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Io(error) => Some(error),
+            Self::FontIo { error, .. } => Some(error),
             Self::Png(error) => Some(error),
             _ => None,
         }
-    }
-}
-impl From<std::io::Error> for RenderError {
-    fn from(error: std::io::Error) -> Self {
-        Self::Io(error)
     }
 }
 impl From<png::EncodingError> for RenderError {
@@ -1100,14 +1265,6 @@ fn svg_shape(
     let opacity = opacity.map_or(String::new(), |value| format!(" opacity=\"{value}\""));
     match shape { Shape::Rect { x, y, width, height } => svg_rect(svg, origin_x + x, origin_y + y, *width, *height, color, if opacity.is_empty() { None } else { Some(".6") }), Shape::Line { x1, y1, x2, y2, width } => write!(svg, r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-linecap="square"{opacity}/>"#, origin_x + x1, origin_y + y1, origin_x + x2, origin_y + y2, color.to_hex(), width).unwrap(), Shape::Polygon(points) => { let points = points.iter().map(|(x, y)| format!("{},{}", origin_x + x, origin_y + y)).collect::<Vec<_>>().join(" "); write!(svg, r#"<polygon points="{points}" fill="{}"{opacity}/>"#, color.to_hex()).unwrap(); } }
 }
-fn escape_xml(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
 /// Reports the crate version.
 #[must_use]
 pub const fn version() -> &'static str {
