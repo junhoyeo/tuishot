@@ -1,0 +1,79 @@
+name: ttyshot screenshot update
+description: Run committed ttyshot scenes and open a pull request for changed screenshots.
+author: Junho Yeo
+
+inputs:
+  scenes:
+    description: Scene file path relative to the consumer repository.
+    required: true
+  paths:
+    description: Newline-separated repository paths that ttyshot may change.
+    required: true
+  branch:
+    description: Dedicated automation-owned update branch.
+    required: false
+    default: ttyshot/update-screenshots
+  title:
+    description: Commit and pull request title.
+    required: false
+    default: "docs: refresh terminal screenshots"
+  body:
+    description: Pull request body. A blank value uses the generated body.
+    required: false
+    default: ""
+  base:
+    description: Pull request base branch. A blank value uses the repository default branch.
+    required: false
+    default: ""
+  token:
+    description: Token for pushing and opening a pull request in the current repository.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  changed:
+    description: Whether the scene run produced allowed repository changes.
+    value: ${{ steps.update.outputs.changed }}
+  pr-url:
+    description: URL of the reused or newly created pull request, or empty when unchanged.
+    value: ${{ steps.update.outputs.pr-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Build this action checkout
+      id: build
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${RUNNER_OS:-}" != "Linux" ]]; then
+          printf 'ttyshot action: only Linux runners are supported before the public launch\n' >&2
+          exit 1
+        fi
+        build_root="$RUNNER_TEMP/ttyshot-action-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        mkdir -p "$build_root"
+        cargo build \
+          --locked \
+          --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" \
+          --package ttyshot \
+          --target-dir "$build_root/target"
+        printf 'ttyshot-bin=%s\n' "$build_root/target/debug/ttyshot" >> "$GITHUB_OUTPUT"
+
+    - name: Run scenes and update pull request
+      id: update
+      shell: bash
+      env:
+        TTYSHOT_BIN: ${{ steps.build.outputs.ttyshot-bin }}
+        TTYSHOT_SCENES: ${{ inputs.scenes }}
+        TTYSHOT_ALLOWED_PATHS: ${{ inputs.paths }}
+        TTYSHOT_UPDATE_BRANCH: ${{ inputs.branch }}
+        TTYSHOT_UPDATE_TITLE: ${{ inputs.title }}
+        TTYSHOT_PR_BODY: ${{ inputs.body }}
+        TTYSHOT_BASE_BRANCH: ${{ inputs.base }}
+        TTYSHOT_DEFAULT_BASE: ${{ github.event.repository.default_branch }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/github-action.sh"
+
+branding:
+  icon: camera
+  color: black
