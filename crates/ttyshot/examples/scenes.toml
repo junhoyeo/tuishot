@@ -1,0 +1,27 @@
+version = 1
+
+[defaults]
+size = "100x30"
+timeout = "10s"
+formats = ["png", "svg"]
+output_dir = "screenshots"
+deterministic_fonts = true
+
+[[scene]]
+name = "demo"
+command = ["./my-tui", "--demo"]
+env_clear = true
+env = { LANG = "en_US.UTF-8", TZ = "UTC" }
+
+[[scene.step]]
+wait_text = "Ready"
+
+[[scene.step]]
+key = "tab"
+
+[[scene.step]]
+wait_stable = "300ms"
+
+[[scene.step]]
+shot = "demo"
+panel = "Overview"
