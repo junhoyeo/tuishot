@@ -9,6 +9,7 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -301,6 +302,8 @@ pub struct Session {
     process_group: Pid,
     deadline: Instant,
     loop_thread: Option<JoinHandle<()>>,
+    query_sender: Sender<QueryMessage>,
+    query_thread: Option<JoinHandle<()>>,
     watchdog_thread: Option<JoinHandle<()>>,
 }
 
@@ -321,34 +324,7 @@ impl Session {
             ));
         }
         validate_cwd(builder.environment.cwd.as_deref())?;
-
-        let mut variables = builder.environment.variables();
-        let shell = if builder.environment.inherit {
-            Shell::new(builder.command.program, builder.command.args)
-        } else {
-            let mut args = Vec::with_capacity(variables.len() + builder.command.args.len() + 2);
-            args.push("-i".to_owned());
-            args.extend(
-                variables
-                    .iter()
-                    .map(|(key, value)| format!("{key}={value}")),
-            );
-            args.push(builder.command.program);
-            args.extend(builder.command.args);
-            Shell::new("/usr/bin/env".to_owned(), args)
-        };
-
-        let options = tty::Options {
-            shell: Some(shell),
-            working_directory: builder.environment.cwd,
-            drain_on_exit: true,
-            env: if builder.environment.inherit {
-                variables.into_iter().collect::<HashMap<_, _>>()
-            } else {
-                variables.clear();
-                HashMap::new()
-            },
-        };
+        let options = tty_options(builder.command, builder.environment);
 
         let pty = tty::new(&options, size.window_size(), 0)
             .map_err(|error| DriverError::Spawn(error.to_string()))?;
@@ -359,10 +335,11 @@ impl Session {
 
         let control = Arc::new(Control::default());
         let sender_slot = Arc::new(Mutex::new(None));
+        let (query_sender, query_receiver) = mpsc::channel();
         let event_proxy = DriverEventProxy {
             sender: Arc::clone(&sender_slot),
             control: Arc::clone(&control),
-            theme: builder.theme,
+            query_sender: query_sender.clone(),
         };
         let term_config = TermConfig {
             scrolling_history: 0,
@@ -386,6 +363,20 @@ impl Session {
         *sender_slot
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sender.clone());
+        let query_terminal = Arc::clone(&terminal);
+        let query_sender_slot = Arc::clone(&sender_slot);
+        let query_theme = builder.theme;
+        let query_thread = thread::Builder::new()
+            .name("ttyshot color queries".to_owned())
+            .spawn(move || {
+                color_query_loop(
+                    &query_receiver,
+                    &query_terminal,
+                    &query_sender_slot,
+                    &query_theme,
+                );
+            })
+            .map_err(|error| DriverError::Spawn(error.to_string()))?;
         let pty_thread = event_loop.spawn();
         let loop_control = Arc::clone(&control);
         let loop_thread = thread::Builder::new()
@@ -409,6 +400,8 @@ impl Session {
             process_group,
             deadline,
             loop_thread: Some(loop_thread),
+            query_sender,
+            query_thread: Some(query_thread),
             watchdog_thread: Some(watchdog_thread),
         })
     }
@@ -609,12 +602,16 @@ impl Drop for Session {
     fn drop(&mut self) {
         kill_process_group(self.process_group);
         self.control.close();
+        let _ = self.query_sender.send(QueryMessage::Shutdown);
         let _ = self.sender.send(Msg::Shutdown);
 
         if let Some(thread) = self.watchdog_thread.take() {
             let _ = thread.join();
         }
         if let Some(thread) = self.loop_thread.take() {
+            let _ = thread.join();
+        }
+        if let Some(thread) = self.query_thread.take() {
             let _ = thread.join();
         }
     }
@@ -753,7 +750,7 @@ impl Control {
 struct DriverEventProxy {
     sender: Arc<Mutex<Option<EventLoopSender>>>,
     control: Arc<Control>,
-    theme: Theme,
+    query_sender: Sender<QueryMessage>,
 }
 
 impl EventListener for DriverEventProxy {
@@ -761,8 +758,9 @@ impl EventListener for DriverEventProxy {
         match event {
             Event::PtyWrite(text) => self.write_reply(text.into_bytes()),
             Event::ColorRequest(index, format) => {
-                let color = query_color(&self.theme, index);
-                self.write_reply(format(color).into_bytes());
+                let _ = self
+                    .query_sender
+                    .send(QueryMessage::Color { index, format });
             }
             Event::Wakeup => self.control.wakeup(),
             Event::ChildExit(status) => self.control.child_exited(status),
@@ -783,16 +781,44 @@ impl DriverEventProxy {
     }
 }
 
+type ColorFormatter = Arc<dyn Fn(AlacrittyRgb) -> String + Send + Sync + 'static>;
+
+enum QueryMessage {
+    Color {
+        index: usize,
+        format: ColorFormatter,
+    },
+    Shutdown,
+}
+
+fn color_query_loop(
+    receiver: &Receiver<QueryMessage>,
+    terminal: &FairMutex<Term<DriverEventProxy>>,
+    sender_slot: &Mutex<Option<EventLoopSender>>,
+    theme: &Theme,
+) {
+    while let Ok(message) = receiver.recv() {
+        let QueryMessage::Color { index, format } = message else {
+            return;
+        };
+        let active = terminal.lock().colors()[index];
+        let color = query_color(theme, index, active);
+        let sender = sender_slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(sender) = sender.as_ref() {
+            let _ = sender.send(Msg::Input(Cow::Owned(format(color).into_bytes())));
+        }
+    }
+}
+
 fn watchdog(deadline: Instant, process_group: Pid, control: &Control) {
     let mut state = control
         .state
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     loop {
-        if matches!(
-            state.process,
-            ProcessState::Closed | ProcessState::Exited(_)
-        ) {
+        if matches!(state.process, ProcessState::Closed) {
             return;
         }
         let now = Instant::now();
@@ -816,6 +842,34 @@ fn kill_process_group(process_group: Pid) {
     let _ = killpg(process_group, Signal::SIGKILL);
 }
 
+fn tty_options(command: Command, environment: Environment) -> tty::Options {
+    let variables = environment.variables();
+    let (shell, env) = if environment.inherit {
+        (
+            Shell::new(command.program, command.args),
+            variables.into_iter().collect::<HashMap<_, _>>(),
+        )
+    } else {
+        let mut args = Vec::with_capacity(variables.len() + command.args.len() + 2);
+        args.push("-i".to_owned());
+        args.extend(
+            variables
+                .iter()
+                .map(|(key, value)| format!("{key}={value}")),
+        );
+        args.push(command.program);
+        args.extend(command.args);
+        (Shell::new("/usr/bin/env".to_owned(), args), HashMap::new())
+    };
+
+    tty::Options {
+        shell: Some(shell),
+        working_directory: environment.cwd,
+        drain_on_exit: true,
+        env,
+    }
+}
+
 fn validate_cwd(cwd: Option<&Path>) -> Result<(), DriverError> {
     if let Some(cwd) = cwd
         && !cwd.is_dir()
@@ -828,7 +882,10 @@ fn validate_cwd(cwd: Option<&Path>) -> Result<(), DriverError> {
     Ok(())
 }
 
-fn query_color(theme: &Theme, index: usize) -> AlacrittyRgb {
+fn query_color(theme: &Theme, index: usize, active: Option<AlacrittyRgb>) -> AlacrittyRgb {
+    if let Some(active) = active {
+        return active;
+    }
     let color = match index {
         0..=15 => theme.palette[index],
         257 => theme.background,

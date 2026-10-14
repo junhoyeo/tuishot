@@ -28,7 +28,7 @@ The concrete source points used above are:
 
 ## Decision
 
-Use `alacritty_terminal` 0.26.0 with default features disabled. ttyshot supplies a small event listener that writes terminal replies to the PTY and resolves OSC 10/11 from the selected deterministic theme.
+Use `alacritty_terminal` 0.26.0 with default features disabled. ttyshot supplies a small event listener that writes terminal replies to the PTY and resolves OSC 10/11 from the active terminal palette, falling back to the selected deterministic theme.
 
 Use Alacritty's Unix PTY wrapper, which creates a new session/process group and applies the exact initial window size. In inherit mode, ttyshot passes deterministic terminal variables as overrides. In clear mode, the PTY child starts through `/usr/bin/env -i`, so the target command cannot observe the environment that Alacritty's wrapper inherited. ttyshot records the session leader and uses a safe `nix::killpg` call for timeout and drop cleanup.
 

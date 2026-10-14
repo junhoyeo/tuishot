@@ -29,6 +29,9 @@ printf '\033[3;4H'
 query "${esc}[3;4R" '\033[6n'
 query "${esc}]10;rgb:d8d8/dede/e9e9$(printf '\007')" '\033]10;?\007'
 query "${esc}]11;rgb:1717/1b1b/2424$(printf '\007')" '\033]11;?\007'
+printf '\033]10;#010203\007\033]11;#040506\007'
+query "${esc}]10;rgb:0101/0202/0303$(printf '\007')" '\033]10;?\007'
+query "${esc}]11;rgb:0404/0505/0606$(printf '\007')" '\033]11;?\007'
 query "${esc}[?0u" '\033[?u'
 printf '\033[H\033[2JQUERY_OK'
 "#;
@@ -325,6 +328,29 @@ fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
     assert!(message.contains("text \"NEVER\""), "{message}");
     assert!(message.contains("TREE_READY"), "{message}");
     assert_process_group_gone(process_group);
+    drop(session);
+    fs::remove_file(pid_file).unwrap();
+}
+
+#[test]
+fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
+    let pid_file = unique_pid_file("leader-exit");
+    let script = format!(
+        "(trap '' HUP; sleep 30) & child=$!; printf '%s %s\\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
+        pid_file.display()
+    );
+    let session = shell_session(&script, Size::new(50, 4), Duration::from_millis(250));
+    session
+        .wait_text("LEADER_EXITED", Duration::from_millis(200))
+        .unwrap();
+    let process_group = read_process_group(&pid_file);
+
+    assert_process_group_gone(process_group);
+    let error = session
+        .wait_text("NEVER", Duration::from_secs(1))
+        .unwrap_err();
+    assert!(matches!(error, DriverError::Timeout { .. }), "{error}");
+
     drop(session);
     fs::remove_file(pid_file).unwrap();
 }
