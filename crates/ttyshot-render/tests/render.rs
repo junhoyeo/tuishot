@@ -624,6 +624,56 @@ fn svg_curly_underline_repeats_png_period_across_a_wide_cell() {
 }
 
 #[test]
+fn terminal_scrollbar_glyphs_render_as_filled_geometry_at_one_and_two_x() {
+    let foreground = Rgb::new(240, 245, 250);
+    let background = Rgb::new(2, 3, 5);
+    for scale in [1, 2] {
+        let mut grid = Grid::new(3, 1).unwrap();
+        for (x, character) in ['▴', '▮', '▾'].into_iter().enumerate() {
+            grid.put(
+                u16::try_from(x).unwrap(),
+                0,
+                character.to_string(),
+                CellWidth::Single,
+                solid_style(foreground, background),
+            )
+            .unwrap();
+        }
+        let png = Renderer::new(RenderOptions {
+            cell_width: 12,
+            cell_height: 24,
+            scale,
+            padding: Padding::all(0),
+            font_mode: FontMode::Deterministic,
+            ..RenderOptions::default()
+        })
+        .unwrap()
+        .render_png(&grid)
+        .unwrap();
+        let (width, height, pixels) = decode(&png);
+        let cell_width = 12 * u32::from(scale);
+        let ink = [foreground.r, foreground.g, foreground.b, 255];
+        let blank = [background.r, background.g, background.b, 255];
+
+        assert_eq!(
+            pixel(&pixels, width, cell_width + cell_width / 2, height / 2),
+            ink
+        );
+        assert_eq!(pixel(&pixels, width, cell_width, 0), blank);
+        assert_eq!(pixel(&pixels, width, cell_width / 2, height / 4), ink);
+        assert_eq!(
+            pixel(
+                &pixels,
+                width,
+                2 * cell_width + cell_width / 2,
+                3 * height / 4 - 1
+            ),
+            ink
+        );
+    }
+}
+
+#[test]
 fn every_powerline_separator_has_distinct_scale_safe_geometry() {
     let foreground = Rgb::new(247, 80, 120);
     let background = Rgb::new(2, 3, 5);
