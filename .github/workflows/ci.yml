@@ -21,6 +21,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features --locked
+      - name: Ratatui feature matrix
+        run: |
+          cargo test -p ttyshot-ratatui --locked
+          cargo test -p ttyshot-ratatui --no-default-features --features ratatui-0-30 --locked
+          cargo check -p ttyshot-ratatui --no-default-features --locked
 
   deny:
     name: Linux / cargo-deny
