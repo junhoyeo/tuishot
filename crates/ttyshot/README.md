@@ -9,6 +9,7 @@ ttyshot run ttyshot.toml
 ```
 
 A one-shot capture supports exact-text, regex, absence, and stability waits. It can send named keys, one Unicode scalar, or `ctrl-a` through `ctrl-z`. `--timeout` is a hard session deadline and cannot be extended by later waits.
+When no wait option is supplied, ttyshot waits for the first non-whitespace screen content and then 100 ms of event-driven screen stability. Slow or color-only interfaces should select an explicit wait condition.
 
 Scene files use `version = 1`, `[defaults]`, one or more `[[scene]]` tables, and ordered `[[scene.step]]` actions. See [`examples/scenes.toml`](examples/scenes.toml) for the full format.
 

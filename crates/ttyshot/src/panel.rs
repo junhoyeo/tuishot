@@ -269,6 +269,32 @@ mod tests {
     }
 
     #[test]
+    fn finds_a_panel_with_a_two_cell_title() {
+        let mut frame = Grid::new(6, 3).unwrap();
+        let style = Style::default();
+        for (x, symbol) in [(0, "┌"), (1, "─"), (4, "─"), (5, "┐")] {
+            frame.put(x, 0, symbol, CellWidth::Single, style).unwrap();
+        }
+        frame.put(2, 0, "界", CellWidth::Wide, style).unwrap();
+        for (x, symbol) in [(0, "│"), (5, "│")] {
+            frame.put(x, 1, symbol, CellWidth::Single, style).unwrap();
+        }
+        for (x, symbol) in [(0, "└"), (1, "─"), (2, "─"), (3, "─"), (4, "─"), (5, "┘")]
+        {
+            frame.put(x, 2, symbol, CellWidth::Single, style).unwrap();
+        }
+        assert_eq!(
+            find_panel(&frame, "界").unwrap(),
+            CellRect {
+                x: 0,
+                y: 0,
+                width: 6,
+                height: 3,
+            }
+        );
+    }
+
+    #[test]
     fn rejects_broken_side_and_bottom() {
         let broken = grid(&["┌─ X ─┐", "│      ", "└─────┘"]);
         let error = find_panel(&broken, "X").unwrap_err().to_string();

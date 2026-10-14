@@ -394,6 +394,8 @@ fn validate(raw: RawFile, source: &Path) -> Result<SceneFile, Error> {
                         "{label}: shot basename must not be empty or contain NUL"
                     )));
                 }
+                validate_shot_basename(&basename)
+                    .map_err(|message| Error::msg(format!("{label}: {message}")))?;
                 let formats = step
                     .formats
                     .as_deref()
@@ -437,9 +439,11 @@ fn validate(raw: RawFile, source: &Path) -> Result<SceneFile, Error> {
                 scene.name
             )));
         }
+        let mut command = scene.command;
+        command[0] = resolve_scene_program(base, &command[0]);
         scenes.push(Scene {
             name: scene.name,
-            command: scene.command,
+            command,
             size,
             timeout,
             environment,
@@ -449,6 +453,32 @@ fn validate(raw: RawFile, source: &Path) -> Result<SceneFile, Error> {
     }
     Ok(SceneFile { scenes })
 }
+fn validate_shot_basename(value: &str) -> Result<(), String> {
+    use std::path::Component;
+    let mut components = Path::new(value).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(_)), None) => Ok(()),
+        _ => Err(format!(
+            "shot {value:?} must be one relative file-name component without separators, '.' or '..'"
+        )),
+    }
+}
+
+fn resolve_scene_program(base: &Path, program: &str) -> String {
+    use std::path::Component;
+    let path = Path::new(program);
+    let path_like = path.components().count() > 1
+        || matches!(
+            path.components().next(),
+            Some(Component::CurDir | Component::ParentDir)
+        );
+    if path.is_relative() && path_like {
+        base.join(path).to_string_lossy().into_owned()
+    } else {
+        program.to_owned()
+    }
+}
+
 fn context(scene: &str, message: impl std::fmt::Display) -> Error {
     Error::msg(format!("scene {scene:?}: {message}"))
 }
@@ -720,24 +750,38 @@ panel=''",
         }
     }
     #[test]
-    fn dot_segment_outputs_cannot_bypass_duplicate_detection() {
-        let error = parse(
-            "version=1
-[defaults]
-formats=['png']
-[[scene]]
-name='x'
-command=['x']
-[[scene.step]]
-shot='a/../same'
-[[scene.step]]
-shot='same'",
-            Path::new("scene.toml"),
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("duplicate scene output"), "{error}");
+    fn rejects_shot_paths_that_escape_the_output_directory() {
+        for shot in ["../escaped", "/tmp/escaped", "nested/escaped", ".", ".."] {
+            let body = format!(
+                "version=1\n[[scene]]\nname='x'\ncommand=['x']\n[[scene.step]]\nshot={shot:?}"
+            );
+            let error = parse(&body, Path::new("scene.toml"))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("one relative file-name component"),
+                "{shot}: {error}"
+            );
+        }
     }
+
+    #[test]
+    fn resolves_path_like_programs_from_the_scene_directory() {
+        let file = parse_ok(
+            "version=1\n[[scene]]\nname='x'\ncommand=['./fixtures/app','arg']\n[[scene.step]]\nshot='frame'",
+        );
+        assert_eq!(
+            Path::new(&file.scenes[0].command[0]),
+            Path::new("/tmp/project/fixtures/app")
+        );
+        assert_eq!(file.scenes[0].command[1], "arg");
+
+        let bare = parse_ok(
+            "version=1\n[[scene]]\nname='x'\ncommand=['app']\n[[scene.step]]\nshot='frame'",
+        );
+        assert_eq!(bare.scenes[0].command[0], "app");
+    }
+
     #[test]
     fn invalid_values_have_context() {
         for fragment in ["size='0x2'", "timeout='later'", "env={ '=BAD'='x' }"] {

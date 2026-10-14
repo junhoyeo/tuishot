@@ -146,6 +146,13 @@ pub fn capture(args: &CaptureArgs) -> Result<Vec<std::path::PathBuf>, Error> {
         session.wait_stable(value, args.timeout)?;
         waited = true;
     }
+    // The zero-configuration capture must not accept an initially blank PTY as
+    // a stable frame while a slower TUI is still starting. Explicit waits take
+    // precedence; otherwise wait for visible text, then for event-driven
+    // stability. Color-only interfaces can select an explicit wait condition.
+    if !waited {
+        session.wait_regex(r"\S", args.timeout)?;
+    }
     for &key in &args.keys {
         session.key(key)?;
     }
