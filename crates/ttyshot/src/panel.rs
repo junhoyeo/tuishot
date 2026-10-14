@@ -135,16 +135,14 @@ fn find_for_border(grid: &Grid, title: &str, border: Border, output: &mut Vec<Ca
                 if symbol(grid, right, top) != border.tr {
                     continue;
                 }
-                let Some((title_start, title_end)) =
-                    find_title_cells(grid, top, left + 1, right, title)
-                else {
-                    continue;
-                };
-                if !(left + 1..title_start).all(|x| is_top_fill(symbol(grid, x, top), border.h))
-                    || !(title_end..right).all(|x| is_top_fill(symbol(grid, x, top), border.h))
-                {
+                if find_title_cells(grid, top, left + 1, right, title).is_none() {
                     continue;
                 }
+                // Terminal panel borders can carry more than one label (for
+                // example a title on the left and a total on the right). The
+                // exact requested title plus matching corners, continuous
+                // sides, and a complete bottom uniquely identify the panel;
+                // other top-border labels are valid content.
                 for bottom in top.saturating_add(1)..grid.rows() {
                     if !(top + 1..bottom).all(|y| {
                         symbol(grid, left, y) == border.v && symbol(grid, right, y) == border.v
@@ -169,9 +167,6 @@ fn find_for_border(grid: &Grid, title: &str, border: Border, output: &mut Vec<Ca
             }
         }
     }
-}
-fn is_top_fill(value: &str, horizontal: &str) -> bool {
-    value == horizontal || value == " "
 }
 fn symbol(grid: &Grid, x: u16, y: u16) -> &str {
     &grid.get(x, y).expect("coordinates in grid").symbol
@@ -255,6 +250,24 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn finds_title_when_top_border_has_a_second_label() {
+        let frame = grid(&[
+            "+ Models by Cost ---- Total: $4.89 +",
+            "|                                  |",
+            "+----------------------------------+",
+        ]);
+        assert_eq!(
+            find_panel(&frame, "Models by Cost").unwrap(),
+            CellRect {
+                x: 0,
+                y: 0,
+                width: 36,
+                height: 3,
+            }
+        );
+    }
+
     #[test]
     fn rejects_broken_side_and_bottom() {
         let broken = grid(&["┌─ X ─┐", "│      ", "└─────┘"]);
