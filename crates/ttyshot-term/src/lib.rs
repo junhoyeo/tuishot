@@ -1091,7 +1091,10 @@ fn kitty_key_bytes(key: Key, mode: TermMode) -> Result<Vec<u8>, DriverError> {
         Key::PageDown => "\x1b[6;1~".to_owned(),
         Key::Insert => "\x1b[2;1~".to_owned(),
         Key::Delete => "\x1b[3;1~".to_owned(),
-        Key::Function(number @ 1..=12) => {
+        Key::Function(number @ 1..=4) => {
+            format!("\x1b[1;1{}", char::from(b'P' + number - 1))
+        }
+        Key::Function(number @ 5..=12) => {
             format!("\x1b[{};1~", function_key_code(number)?)
         }
         Key::Function(number) => return Err(invalid_function_key(number)),
@@ -1385,6 +1388,42 @@ mod tests {
                 .process,
             ProcessState::TimedOut
         ));
+    }
+
+    #[test]
+    fn kitty_function_keys_are_byte_exact_in_all_relevant_modes() {
+        let expected: [&[u8]; 12] = [
+            b"\x1b[1;1P",
+            b"\x1b[1;1Q",
+            b"\x1b[1;1R",
+            b"\x1b[1;1S",
+            b"\x1b[15;1~",
+            b"\x1b[17;1~",
+            b"\x1b[18;1~",
+            b"\x1b[19;1~",
+            b"\x1b[20;1~",
+            b"\x1b[21;1~",
+            b"\x1b[23;1~",
+            b"\x1b[24;1~",
+        ];
+        let kitty = TermMode::KITTY_KEYBOARD_PROTOCOL;
+        let modes = [
+            kitty,
+            kitty | TermMode::REPORT_ALL_KEYS_AS_ESC,
+            kitty | TermMode::REPORT_ASSOCIATED_TEXT,
+            kitty | TermMode::REPORT_ALL_KEYS_AS_ESC | TermMode::REPORT_ASSOCIATED_TEXT,
+        ];
+
+        for mode in modes {
+            for (index, expected_bytes) in expected.iter().enumerate() {
+                let number = u8::try_from(index + 1).unwrap();
+                assert_eq!(
+                    key_bytes(Key::Function(number), mode).unwrap(),
+                    *expected_bytes,
+                    "F{number} in mode {mode:?}"
+                );
+            }
+        }
     }
 
     #[test]
