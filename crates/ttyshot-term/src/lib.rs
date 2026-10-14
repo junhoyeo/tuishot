@@ -31,6 +31,7 @@ use alacritty_terminal::vte::ansi::{
 };
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
+use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::{Pid, getpgid};
 use regex::Regex;
 use ttyshot_core::{
@@ -910,6 +911,7 @@ impl ProcessCleanup {
 }
 
 fn wait_for_process_group(cleanup: &ProcessCleanup, deadline: Instant) -> Result<(), DriverError> {
+    let mut group_ready = false;
     loop {
         if Instant::now() >= deadline {
             cleanup.kill();
@@ -918,9 +920,36 @@ fn wait_for_process_group(cleanup: &ProcessCleanup, deadline: Instant) -> Result
             ));
         }
 
-        match getpgid(Some(cleanup.child_pid)) {
-            Ok(process_group) if process_group == cleanup.child_pid => {
-                cleanup.mark_group_ready();
+        if !group_ready {
+            match getpgid(Some(cleanup.child_pid)) {
+                Ok(process_group) if process_group == cleanup.child_pid => {
+                    cleanup.mark_group_ready();
+                    group_ready = true;
+                }
+                Ok(_) => {
+                    thread::yield_now();
+                    continue;
+                }
+                Err(Errno::ESRCH) => {
+                    cleanup.kill();
+                    return Err(DriverError::Spawn(
+                        "child exited before its process group was ready".to_owned(),
+                    ));
+                }
+                Err(error) => {
+                    cleanup.kill();
+                    return Err(DriverError::Spawn(format!(
+                        "failed to inspect child process group: {error}"
+                    )));
+                }
+            }
+        }
+
+        match waitpid(
+            cleanup.child_pid,
+            Some(WaitPidFlag::WNOHANG | WaitPidFlag::WUNTRACED),
+        ) {
+            Ok(WaitStatus::Stopped(_, Signal::SIGSTOP)) => {
                 if Instant::now() >= deadline {
                     cleanup.kill();
                     return Err(DriverError::Spawn(
@@ -928,19 +957,25 @@ fn wait_for_process_group(cleanup: &ProcessCleanup, deadline: Instant) -> Result
                             .to_owned(),
                     ));
                 }
+                if let Err(error) = kill(cleanup.child_pid, Signal::SIGCONT) {
+                    cleanup.kill();
+                    return Err(DriverError::Spawn(format!(
+                        "failed to release child process group startup barrier: {error}"
+                    )));
+                }
                 return Ok(());
             }
-            Ok(_) => thread::yield_now(),
-            Err(Errno::ESRCH) => {
+            Ok(WaitStatus::StillAlive) | Err(Errno::EINTR) => thread::yield_now(),
+            Ok(status) => {
                 cleanup.kill();
-                return Err(DriverError::Spawn(
-                    "child exited before its process group was ready".to_owned(),
-                ));
+                return Err(DriverError::Spawn(format!(
+                    "child changed state before its process group was ready: {status:?}"
+                )));
             }
             Err(error) => {
                 cleanup.kill();
                 return Err(DriverError::Spawn(format!(
-                    "failed to inspect child process group: {error}"
+                    "failed to wait for child process group readiness: {error}"
                 )));
             }
         }
@@ -975,9 +1010,10 @@ fn watchdog(deadline: Instant, cleanup: &ProcessCleanup, control: &Control) {
 
 fn tty_options(command: Command, environment: Environment) -> tty::Options {
     let variables = environment.variables();
-    let (shell, env) = if environment.inherit {
+    let (program, args, env) = if environment.inherit {
         (
-            Shell::new(command.program, command.args),
+            command.program,
+            command.args,
             variables.into_iter().collect::<HashMap<_, _>>(),
         )
     } else {
@@ -990,11 +1026,22 @@ fn tty_options(command: Command, environment: Environment) -> tty::Options {
         );
         args.push(command.program);
         args.extend(command.args);
-        (Shell::new("/usr/bin/env".to_owned(), args), HashMap::new())
+        ("/usr/bin/env".to_owned(), args, HashMap::new())
     };
 
+    // Alacritty calls setsid before executing this shell. Stop at that boundary
+    // so the parent can observe PGID readiness before the target can exit.
+    let mut barrier_args = Vec::with_capacity(args.len() + 4);
+    barrier_args.extend([
+        "-c".to_owned(),
+        r#"kill -STOP $$; exec "$@""#.to_owned(),
+        "ttyshot-session".to_owned(),
+        program,
+    ]);
+    barrier_args.extend(args);
+
     tty::Options {
-        shell: Some(shell),
+        shell: Some(Shell::new("/bin/sh".to_owned(), barrier_args)),
         working_directory: environment.cwd,
         drain_on_exit: true,
         env,
