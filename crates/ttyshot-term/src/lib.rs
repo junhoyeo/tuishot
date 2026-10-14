@@ -500,20 +500,32 @@ impl Session {
         timeout: Duration,
     ) -> Result<Grid, DriverError> {
         let action_deadline = self.action_deadline(timeout);
+        let awaited = format!("screen stability for {stable_for:?}");
+        let mut generation = self.control.generation();
         let mut candidate = self.snapshot();
         let mut stable_since = Instant::now();
 
         loop {
-            let generation = self.control.generation();
             let now = Instant::now();
-            if now.duration_since(stable_since) >= stable_for {
-                return Ok(candidate);
-            }
             if now >= action_deadline {
-                return Err(Self::timeout_error(
-                    format!("screen stability for {stable_for:?}"),
-                    &candidate,
-                ));
+                return Err(self.timeout_error_fresh(awaited));
+            }
+            if now.duration_since(stable_since) >= stable_for {
+                match self.control.guard_success(generation, action_deadline) {
+                    SuccessGuard::Ready => return Ok(candidate),
+                    SuccessGuard::TimedOut => {
+                        return Err(self.timeout_error_fresh(awaited));
+                    }
+                    SuccessGuard::Changed => {
+                        generation = self.control.generation();
+                        let current = self.snapshot();
+                        if current != candidate {
+                            candidate = current;
+                            stable_since = Instant::now();
+                        }
+                        continue;
+                    }
+                }
             }
 
             let wake_at = action_deadline.min(
@@ -521,12 +533,20 @@ impl Session {
                     .checked_add(stable_for)
                     .unwrap_or(action_deadline),
             );
-            self.control
-                .wait_for_change(generation, wake_at, "screen stability", &candidate)?;
-            let current = self.snapshot();
-            if current != candidate {
-                candidate = current;
-                stable_since = Instant::now();
+            match self.control.wait_for_change(generation, wake_at) {
+                ControlWake::Changed => {
+                    generation = self.control.generation();
+                    let current = self.snapshot();
+                    if current != candidate {
+                        candidate = current;
+                        stable_since = Instant::now();
+                    }
+                }
+                ControlWake::DeadlineReached => {}
+                ControlWake::TimedOut => return Err(self.timeout_error_fresh(awaited)),
+                ControlWake::Exited(status) => {
+                    return Err(self.exit_error_fresh(awaited, status));
+                }
             }
         }
     }
@@ -546,13 +566,23 @@ impl Session {
             let grid = self.snapshot();
             let screen = grid.plain_text();
             if predicate(&screen) {
-                return Ok(grid);
+                match self.control.guard_success(generation, action_deadline) {
+                    SuccessGuard::Ready => return Ok(grid),
+                    SuccessGuard::Changed => continue,
+                    SuccessGuard::TimedOut => {
+                        return Err(self.timeout_error_fresh(awaited));
+                    }
+                }
             }
-            if Instant::now() >= action_deadline {
-                return Err(Self::timeout_error(awaited, &grid));
+            match self.control.wait_for_change(generation, action_deadline) {
+                ControlWake::Changed => {}
+                ControlWake::DeadlineReached | ControlWake::TimedOut => {
+                    return Err(self.timeout_error_fresh(awaited));
+                }
+                ControlWake::Exited(status) => {
+                    return Err(self.exit_error_fresh(awaited, status));
+                }
             }
-            self.control
-                .wait_for_change(generation, action_deadline, &awaited, &grid)?;
         }
     }
 
@@ -563,10 +593,18 @@ impl Session {
             .min(self.deadline)
     }
 
-    fn timeout_error(awaited: String, grid: &Grid) -> DriverError {
+    fn timeout_error_fresh(&self, awaited: String) -> DriverError {
         DriverError::Timeout {
             awaited,
-            last_screen: grid.plain_text(),
+            last_screen: self.snapshot().plain_text(),
+        }
+    }
+
+    fn exit_error_fresh(&self, awaited: String, status: Option<i32>) -> DriverError {
+        DriverError::Exited {
+            awaited,
+            status,
+            last_screen: self.snapshot().plain_text(),
         }
     }
 
@@ -585,15 +623,11 @@ impl Session {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if matches!(state.process, ProcessState::TimedOut) || Instant::now() >= self.deadline {
             drop(state);
-            return Err(Self::timeout_error(awaited.to_owned(), &self.snapshot()));
+            return Err(self.timeout_error_fresh(awaited.to_owned()));
         }
         if let ProcessState::Exited(status) = state.process {
             drop(state);
-            return Err(DriverError::Exited {
-                awaited: awaited.to_owned(),
-                status,
-                last_screen: self.snapshot().plain_text(),
-            });
+            return Err(self.exit_error_fresh(awaited.to_owned(), status));
         }
         Ok(())
     }
@@ -638,6 +672,21 @@ enum ProcessState {
     Exited(Option<i32>),
     TimedOut,
     Closed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SuccessGuard {
+    Ready,
+    Changed,
+    TimedOut,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ControlWake {
+    Changed,
+    DeadlineReached,
+    TimedOut,
+    Exited(Option<i32>),
 }
 
 impl Control {
@@ -706,37 +755,41 @@ impl Control {
         self.condvar.notify_all();
     }
 
-    fn wait_for_change(
-        &self,
-        generation: u64,
-        deadline: Instant,
-        awaited: &str,
-        grid: &Grid,
-    ) -> Result<(), DriverError> {
+    fn guard_success(&self, generation: u64, deadline: Instant) -> SuccessGuard {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if matches!(state.process, ProcessState::TimedOut) || Instant::now() >= deadline {
+            SuccessGuard::TimedOut
+        } else if state.generation != generation {
+            SuccessGuard::Changed
+        } else {
+            SuccessGuard::Ready
+        }
+    }
+
+    fn wait_for_change(&self, generation: u64, deadline: Instant) -> ControlWake {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
-            if state.generation != generation {
-                return Ok(());
-            }
             if matches!(state.process, ProcessState::TimedOut) {
-                return Err(DriverError::Timeout {
-                    awaited: awaited.to_owned(),
-                    last_screen: grid.plain_text(),
-                });
-            }
-            if let ProcessState::Exited(status) = state.process {
-                return Err(DriverError::Exited {
-                    awaited: awaited.to_owned(),
-                    status,
-                    last_screen: grid.plain_text(),
-                });
+                return ControlWake::TimedOut;
             }
             let now = Instant::now();
             if now >= deadline {
-                return Ok(());
+                return ControlWake::DeadlineReached;
+            }
+            if state.generation != generation {
+                return ControlWake::Changed;
+            }
+            if let ProcessState::Exited(status) = state.process {
+                return ControlWake::Exited(status);
+            }
+            if matches!(state.process, ProcessState::Closed) {
+                return ControlWake::Exited(None);
             }
             let (new_state, _) = self
                 .condvar
@@ -1259,5 +1312,126 @@ mod tests {
                 .process,
             ProcessState::TimedOut
         ));
+    }
+
+    #[test]
+    fn elapsed_deadline_beats_a_generation_change() {
+        let control = Control::default();
+        let generation = control.generation();
+        control.changed();
+
+        assert_eq!(
+            control.wait_for_change(generation, Instant::now()),
+            ControlWake::DeadlineReached
+        );
+    }
+
+    #[test]
+    fn timed_out_state_beats_a_generation_change() {
+        let control = Control::default();
+        let generation = control.generation();
+        {
+            let mut state = control
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.process = ProcessState::TimedOut;
+            state.generation = state.generation.wrapping_add(1);
+        }
+
+        assert_eq!(
+            control.wait_for_change(generation, Instant::now() + Duration::from_secs(1)),
+            ControlWake::TimedOut
+        );
+    }
+
+    #[test]
+    fn already_matching_screen_cannot_succeed_after_expiry() {
+        let session = shell_test_session("printf MATCH; dd bs=1 count=1 of=/dev/null 2>/dev/null");
+        session.wait_text("MATCH", Duration::from_secs(1)).unwrap();
+
+        let error = session.wait_text("MATCH", Duration::ZERO).unwrap_err();
+        assert!(matches!(error, DriverError::Timeout { .. }), "{error}");
+    }
+
+    #[test]
+    fn stable_screen_cannot_succeed_after_expiry() {
+        let session = shell_test_session("printf STABLE; dd bs=1 count=1 of=/dev/null 2>/dev/null");
+        session.wait_text("STABLE", Duration::from_secs(1)).unwrap();
+
+        let error = session
+            .wait_stable(Duration::ZERO, Duration::ZERO)
+            .unwrap_err();
+        assert!(matches!(error, DriverError::Timeout { .. }), "{error}");
+    }
+
+    #[test]
+    fn timeout_error_snapshots_the_final_screen_after_the_wait_started() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let session = shell_test_session(
+            r"stty raw -echo; printf BEFORE; dd bs=1 count=1 of=/dev/null 2>/dev/null; printf '\r\033[KTIMEOUT_FINAL'; dd bs=1 count=1 of=/dev/null 2>/dev/null",
+        );
+        session.wait_text("BEFORE", Duration::from_secs(1)).unwrap();
+        let released = AtomicBool::new(false);
+
+        let error = session
+            .wait_until("missing text".to_owned(), Duration::ZERO, |screen| {
+                if screen.contains("BEFORE") && !released.swap(true, Ordering::SeqCst) {
+                    session.type_text("x").unwrap();
+                    session
+                        .wait_text("TIMEOUT_FINAL", Duration::from_secs(1))
+                        .unwrap();
+                }
+                false
+            })
+            .unwrap_err();
+        let DriverError::Timeout { last_screen, .. } = error else {
+            panic!("expected timeout error, got {error}");
+        };
+        assert!(last_screen.contains("TIMEOUT_FINAL"), "{last_screen:?}");
+        assert!(!last_screen.contains("BEFORE"), "{last_screen:?}");
+    }
+
+    #[test]
+    fn exit_error_snapshots_the_final_screen_after_the_wait_started() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let session = shell_test_session(
+            r"stty raw -echo; printf BEFORE; dd bs=1 count=1 of=/dev/null 2>/dev/null; printf '\r\033[KFINAL_SCREEN'; exit 7",
+        );
+        session.wait_text("BEFORE", Duration::from_secs(1)).unwrap();
+        let released = AtomicBool::new(false);
+
+        let error = session
+            .wait_until(
+                "missing text".to_owned(),
+                Duration::from_secs(1),
+                |screen| {
+                    if screen.contains("BEFORE") && !released.swap(true, Ordering::SeqCst) {
+                        session.type_text("x").unwrap();
+                    }
+                    false
+                },
+            )
+            .unwrap_err();
+        let DriverError::Exited { last_screen, .. } = error else {
+            panic!("expected exit error, got {error}");
+        };
+        assert!(last_screen.contains("FINAL_SCREEN"), "{last_screen:?}");
+        assert!(!last_screen.contains("BEFORE"), "{last_screen:?}");
+    }
+
+    fn shell_test_session(script: &str) -> Session {
+        SessionBuilder::new(Command::new("/bin/sh").args(["-c", script]))
+            .size(Size::new(40, 4))
+            .environment(
+                Environment::clear()
+                    .var("PATH", "/usr/bin:/bin")
+                    .var("LC_ALL", "C"),
+            )
+            .timeout(Duration::from_secs(2))
+            .spawn()
+            .unwrap()
     }
 }
