@@ -93,6 +93,16 @@ pub enum AdapterError {
         /// Zero-based local row.
         y: u16,
     },
+    /// A cell is deliberately omitted from Ratatui's terminal diff.
+    ///
+    /// A buffer alone cannot recover the image or prior terminal content behind
+    /// such a cell, so converting it as text would not be lossless.
+    SkippedCell {
+        /// Zero-based local column.
+        x: u16,
+        /// Zero-based local row.
+        y: u16,
+    },
     /// The validated conversion was rejected by the core grid.
     Core(GridError),
     /// A JSON snapshot could not be serialized.
@@ -117,6 +127,10 @@ impl fmt::Display for AdapterError {
                     "wide Ratatui cell at ({x}, {y}) crosses the right edge"
                 )
             }
+            Self::SkippedCell { x, y } => write!(
+                formatter,
+                "Ratatui cell ({x}, {y}) is skipped during terminal diffing and cannot be captured losslessly"
+            ),
             Self::Core(error) => write!(formatter, "ttyshot grid rejected the buffer: {error}"),
             Self::Serialize(error) => {
                 write!(formatter, "could not serialize grid snapshot: {error}")
@@ -140,6 +154,7 @@ struct SourceCell<'a> {
     symbol: &'a str,
     width: usize,
     style: Style,
+    skipped: bool,
 }
 
 #[cfg(any(feature = "ratatui-0-29", feature = "ratatui-0-30"))]
@@ -159,6 +174,14 @@ fn convert_cells<'a>(
     }
 
     let source = cells.collect::<Vec<_>>();
+    if let Some(index) = source.iter().position(|cell| cell.skipped) {
+        return Err(AdapterError::SkippedCell {
+            x: u16::try_from(index % usize::from(columns))
+                .expect("column derived from u16 dimensions"),
+            y: u16::try_from(index / usize::from(columns))
+                .expect("row derived from u16 dimensions"),
+        });
+    }
     let mut grid = Grid::new(columns, rows).map_err(AdapterError::Core)?;
     for y in 0..rows {
         let mut x = 0;
@@ -267,6 +290,7 @@ mod v29 {
                     crossed_out: modifiers.contains(Modifier::CROSSED_OUT),
                 }),
             },
+            skipped: cell.skip,
         }
     }
 
@@ -298,7 +322,7 @@ mod v29 {
 #[cfg(feature = "ratatui-0-30")]
 mod v30 {
     use ratatui_0_30::{
-        buffer::{Buffer, Cell, CellWidth as RatatuiCellWidth},
+        buffer::{Buffer, Cell, CellDiffOption, CellWidth as RatatuiCellWidth},
         style::{Color as RatatuiColor, Modifier},
     };
 
@@ -317,6 +341,7 @@ mod v30 {
         }
     }
 
+    #[allow(deprecated)] // Ratatui 0.30 still honors the legacy public `skip` field.
     fn source_cell(cell: &Cell) -> SourceCell<'_> {
         let modifiers = cell.modifier;
         SourceCell {
@@ -338,6 +363,7 @@ mod v30 {
                     crossed_out: modifiers.contains(Modifier::CROSSED_OUT),
                 }),
             },
+            skipped: cell.skip || cell.diff_option == CellDiffOption::Skip,
         }
     }
 
@@ -368,9 +394,7 @@ mod v30 {
 
 #[cfg(all(test, any(feature = "ratatui-0-29", feature = "ratatui-0-30")))]
 mod tests {
-    use super::to_grid;
-    #[cfg(feature = "ratatui-0-30")]
-    use super::{snapshot_json, snapshot_text};
+    use super::{AdapterError, snapshot_json, snapshot_text, to_grid};
     use ttyshot_core::{Blink, CellWidth, Color, Grid, Rgb, Underline};
 
     fn assert_wide_grid(grid: &Grid) {
@@ -534,5 +558,48 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.starts_with("{\n  \"columns\": 3,\n  \"rows\": 2,"));
         assert!(first.contains("\"width\": \"single\""));
+    }
+
+    fn assert_skipped(error: &AdapterError, expected_x: u16, expected_y: u16) {
+        assert!(
+            matches!(
+                error,
+                AdapterError::SkippedCell { x, y }
+                    if *x == expected_x && *y == expected_y
+            ),
+            "unexpected adapter error: {error}"
+        );
+    }
+
+    #[cfg(feature = "ratatui-0-29")]
+    #[test]
+    fn rejects_ratatui_0_29_skipped_cells_including_wide_trailers() {
+        use ratatui_0_29::{buffer::Buffer, layout::Rect, style::Style as RatatuiStyle};
+
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 3, 1));
+        buffer.set_string(0, 0, "界", RatatuiStyle::default());
+        buffer[(1, 0)].set_skip(true);
+
+        assert_skipped(&to_grid(&buffer).unwrap_err(), 1, 0);
+    }
+
+    #[cfg(feature = "ratatui-0-30")]
+    #[test]
+    #[allow(deprecated)] // Both the current and legacy public skip controls remain meaningful.
+    fn rejects_ratatui_0_30_current_and_legacy_skipped_cells() {
+        use ratatui_0_30::{
+            buffer::{Buffer, CellDiffOption},
+            layout::Rect,
+        };
+
+        let mut current = Buffer::empty(Rect::new(0, 0, 2, 1));
+        current[(0, 0)]
+            .set_symbol("x")
+            .set_diff_option(CellDiffOption::Skip);
+        assert_skipped(&to_grid(&current).unwrap_err(), 0, 0);
+
+        let mut legacy = Buffer::empty(Rect::new(0, 0, 2, 1));
+        legacy[(1, 0)].set_symbol("y").set_skip(true);
+        assert_skipped(&to_grid(&legacy).unwrap_err(), 1, 0);
     }
 }

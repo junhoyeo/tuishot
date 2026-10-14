@@ -36,5 +36,9 @@ insta::assert_snapshot!(ttyshot_ratatui::snapshot_json(&buffer)?);
 The text helper keeps the full rectangular frame, including trailing spaces. The JSON helper uses
 ttyshot-core's stable, explicit grid model and pretty-prints fields in a deterministic order.
 
+Cells marked as skipped for Ratatui's terminal diff are rejected with `AdapterError::SkippedCell`.
+Those cells usually sit behind Sixel, iTerm, or Kitty graphics, and a `Buffer` alone does not contain
+the pixels needed to capture them losslessly.
+
 This adapter intentionally stops at `Grid`. An in-process image helper will be added by stacking on
 the renderer work; this crate does not duplicate renderer code.
