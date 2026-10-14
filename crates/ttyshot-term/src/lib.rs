@@ -28,7 +28,8 @@ use nix::sys::signal::{Signal, killpg};
 use nix::unistd::Pid;
 use regex::Regex;
 use ttyshot_core::{
-    Attributes, Blink, CellWidth, Color, Cursor, CursorShape, Grid, Rgb, Style, Theme, Underline,
+    Attributes, Blink, CellWidth, Color, ColorRole, Cursor, CursorShape, Grid, Rgb, Style, Theme,
+    Underline,
 };
 
 pub use ttyshot_core as core;
@@ -887,7 +888,10 @@ fn query_color(theme: &Theme, index: usize, active: Option<AlacrittyRgb>) -> Ala
         return active;
     }
     let color = match index {
-        0..=15 => theme.palette[index],
+        0..=255 => theme.resolve(
+            Color::Indexed(u8::try_from(index).expect("palette index is at most 255")),
+            ColorRole::Foreground,
+        ),
         257 => theme.background,
         258 => theme.cursor,
         _ => theme.foreground,
