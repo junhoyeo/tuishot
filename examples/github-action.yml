@@ -1,4 +1,4 @@
-# Copy this file into .github/workflows/ttyshot.yml in a consumer repository.
+# Copy this file into .github/workflows/tuishot.yml in a consumer repository.
 # Use synthetic fixtures only: screenshots and failure logs can become public.
 name: Refresh terminal screenshots
 
@@ -22,12 +22,12 @@ jobs:
           persist-credentials: false
 
       - name: Refresh synthetic fixture screenshots
-        id: ttyshot
-        uses: junhoyeo/ttyshot@v0
+        id: tuishot
+        uses: junhoyeo/tuishot@v0
         with:
-          scenes: fixtures/readme/ttyshot.toml
+          scenes: fixtures/readme/tuishot.toml
           paths: |
             docs/screenshots
             README-assets/terminal overview.png
-          branch: ttyshot/update-screenshots
+          branch: tuishot/update-screenshots
           title: "docs: refresh terminal screenshots"

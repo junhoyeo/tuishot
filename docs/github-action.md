@@ -1,9 +1,9 @@
 # GitHub Action
 
-The ttyshot composite action runs a committed scene on Linux and opens a pull request only when selected screenshots change.
+The tuishot composite action runs a committed scene on Linux and opens a pull request only when selected screenshots change.
 
 > [!WARNING]
-> Pull requests, action logs, and terminal screenshots can become public. Use synthetic fixture data only. Never capture personal usage, home-directory paths, credentials, customer data, or other sensitive terminal output. A ttyshot timeout can include the last terminal screen in its error.
+> Pull requests, action logs, and terminal screenshots can become public. Use synthetic fixture data only. Never capture personal usage, home-directory paths, credentials, customer data, or other sensitive terminal output. A tuishot timeout can include the last terminal screen in its error.
 
 ## Consumer workflow
 
@@ -23,19 +23,19 @@ permissions:
 
 jobs:
   screenshots:
-    # ttyshot's v0 action supports Linux runners only.
+    # tuishot's v0 action supports Linux runners only.
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: junhoyeo/ttyshot@v0
+      - uses: junhoyeo/tuishot@v0
         with:
-          scenes: fixtures/readme/ttyshot.toml
+          scenes: fixtures/readme/tuishot.toml
           paths: |
             docs/screenshots
             README-assets/terminal overview.png
-          branch: ttyshot/update-screenshots
+          branch: tuishot/update-screenshots
           title: "docs: refresh terminal screenshots"
 ```
 
@@ -44,10 +44,10 @@ The full example is in [`examples/github-action.yml`](../examples/github-action.
 The action changes to its own checkout at `GITHUB_ACTION_PATH` before building. It uses a fresh Cargo home, an explicit Rust host target, a separate target directory under `RUNNER_TEMP`, and removes Rust wrapper/flag environment variables. Consumer `.cargo/config` files and `RUSTC_WRAPPER` settings therefore do not cross the build boundary. It then runs exactly:
 
 ```text
-ttyshot run <scene-file>
+tuishot run <scene-file>
 ```
 
-from the checked-out consumer repository. It does not use a globally installed `ttyshot` or code from generated output.
+from the checked-out consumer repository. It does not use a globally installed `tuishot` or code from generated output.
 
 ## Inputs
 
@@ -55,7 +55,7 @@ from the checked-out consumer repository. It does not use a globally installed `
 | --- | --- | --- | --- |
 | `scenes` | yes | — | One scene file relative to the consumer repository. |
 | `paths` | yes | — | Newline-separated repository files or directories that may change. Spaces are preserved. |
-| `branch` | no | `ttyshot/update-screenshots` | Dedicated update branch owned by this action. |
+| `branch` | no | `tuishot/update-screenshots` | Dedicated update branch owned by this action. |
 | `title` | no | `docs: refresh terminal screenshots` | Commit subject and pull request title. |
 | `body` | no | generated body | Pull request body. The action always passes it to `gh` with `--body-file`. |
 | `base` | no | repository default branch | Pull request base branch. |
@@ -98,7 +98,7 @@ The action does not merge pull requests, publish packages, change repository vis
 
 Treat `branch` as an automation-owned branch. Do not add human commits to it and do not share it with another updater. Use a different branch name if that branch already belongs to a person or another tool.
 
-Before generation, the action reads the branch's remote object ID with replacement objects disabled and fetches that real object. The bot author plus `Generated-by: ttyshot GitHub Action` marker is only an accidental-overwrite guard. It is not authentication or branch identity. The object ID observed from the remote is the actual ownership boundary.
+Before generation, the action reads the branch's remote object ID with replacement objects disabled and fetches that real object. The bot author plus `Generated-by: tuishot GitHub Action` marker is only an accidental-overwrite guard. It is not authentication or branch identity. The object ID observed from the remote is the actual ownership boundary.
 
 A push uses `--force-with-lease=<ref>:<pre-scene-oid>`, including an empty expected value when the branch did not exist. The helper rechecks branch movement before pushing, and the lease closes the final race. Scene changes to `origin`, push URLs, config, replacement refs, or hooks cannot redirect or forge the inspected branch.
 
@@ -108,7 +108,7 @@ After a successful push or exact branch reuse, the helper writes `changed=true` 
 
 ## Local deterministic tests
 
-The shell helper is tested without Docker or GitHub. The suite creates temporary local repositories and a local bare remote, then supplies fake `ttyshot` and `gh` executables:
+The shell helper is tested without Docker or GitHub. The suite creates temporary local repositories and a local bare remote, then supplies fake `tuishot` and `gh` executables:
 
 ```bash
 bash scripts/test-github-action.sh

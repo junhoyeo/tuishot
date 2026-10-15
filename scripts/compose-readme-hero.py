@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
-LABEL_FONT = Path(__file__).parents[1] / "crates/ttyshot-render/assets/JetBrainsMono-Regular.ttf"
+LABEL_FONT = Path(__file__).parents[1] / "crates/tuishot-render/assets/JetBrainsMono-Regular.ttf"
 
 
 def gradient(size: tuple[int, int]) -> Image.Image:
@@ -46,7 +46,7 @@ def compose_collage(args: argparse.Namespace) -> None:
     promise = ImageFont.truetype(str(args.label_font), 35)
     subtitle = ImageFont.truetype(str(args.label_font), 17)
     badge = ImageFont.truetype(str(args.label_font), 18)
-    draw.text((58, 30), "ttyshot", font=brand, fill=(34, 211, 155))
+    draw.text((58, 30), "tuishot", font=brand, fill=(34, 211, 155))
     draw.text((58, 76), "Screenshots of any TUI that look like a real terminal — and stay up to date.", font=promise, fill=(238, 241, 247))
     draw.text((60, 134), "SCRIPTED  ·  DETERMINISTIC  ·  CI-READY  ·  ONE CELL GRID", font=subtitle, fill=(132, 150, 172))
     add_card(canvas, (50, 180, 860, 607), args.tokscale, "TOKSCALE", (34, 211, 155), badge)
@@ -92,12 +92,12 @@ def comparison_crops(args: argparse.Namespace) -> tuple[Image.Image, Image.Image
             if cell["width"] != "continuation" and cell["symbol"] not in ("", " "):
                 draw.text((x + 1, y), cell["symbol"], font=font, fill=foreground)
 
-    ttyshot = Image.open(args.tokscale).convert("RGB")
-    if ttyshot.size != (2528, 1784):
-        raise SystemExit(f"ttyshot comparison source must be 2528x1784, got {ttyshot.size}")
+    tuishot = Image.open(args.tokscale).convert("RGB")
+    if tuishot.size != (2528, 1784):
+        raise SystemExit(f"tuishot comparison source must be 2528x1784, got {tuishot.size}")
     left, top = 64 + 27 * 20, 120 + 5 * 40
     right, bottom = 64 + 39 * 20, 120 + 11 * 40
-    geometry = ttyshot.crop((left, top, right, bottom)).resize(glyph.size, Image.Resampling.NEAREST)
+    geometry = tuishot.crop((left, top, right, bottom)).resize(glyph.size, Image.Resampling.NEAREST)
     return glyph.resize((720, 720), Image.Resampling.NEAREST), geometry.resize((720, 720), Image.Resampling.NEAREST)
 
 
@@ -108,7 +108,7 @@ def compose_comparison(args: argparse.Namespace) -> None:
     title = ImageFont.truetype(str(args.label_font), 30)
     label = ImageFont.truetype(str(args.label_font), 22)
     small = ImageFont.truetype(str(args.label_font), 16)
-    draw.text((48, 24), "Menlo glyphs leave gaps here. ttyshot geometry stays seam-free.", font=title, fill=(235, 239, 246))
+    draw.text((48, 24), "Menlo glyphs leave gaps here. tuishot geometry stays seam-free.", font=title, fill=(235, 239, 246))
     draw.text((50, 70), "SYNTHETIC TOKSCALE · SAME 12×6 CELLS + COLORS · 6× NEAREST-NEIGHBOUR", font=small, fill=(132, 149, 170))
 
     def panel(x: int, heading: str, note: str, accent: tuple[int, int, int], image: Image.Image) -> None:
@@ -124,7 +124,7 @@ def compose_comparison(args: argparse.Namespace) -> None:
         canvas.alpha_composite(image.convert("RGBA"), (x, 164))
 
     panel(48, "FONT-GLYPH EXPORT", "Menlo glyphs", (232, 133, 104), glyph)
-    panel(832, "TTYSHOT GEOMETRY", "shared cell edges", (36, 203, 154), geometry)
+    panel(832, "TUISHOT GEOMETRY", "shared cell edges", (36, 203, 154), geometry)
     args.comparison_output.parent.mkdir(parents=True, exist_ok=True)
     canvas.convert("RGB").save(args.comparison_output, optimize=True)
 

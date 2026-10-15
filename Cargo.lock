@@ -1937,7 +1937,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ttyshot"
+name = "tuishot"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -1946,13 +1946,13 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
- "ttyshot-core",
- "ttyshot-render",
- "ttyshot-term",
+ "tuishot-core",
+ "tuishot-render",
+ "tuishot-term",
 ]
 
 [[package]]
-name = "ttyshot-core"
+name = "tuishot-core"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1960,19 +1960,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "ttyshot-ratatui"
+name = "tuishot-ratatui"
 version = "0.1.0"
 dependencies = [
  "ratatui 0.29.0",
  "ratatui 0.30.2",
  "serde_json",
- "ttyshot-core",
- "ttyshot-render",
+ "tuishot-core",
+ "tuishot-render",
  "unicode-width 0.2.0",
 ]
 
 [[package]]
-name = "ttyshot-render"
+name = "tuishot-render"
 version = "0.1.0"
 dependencies = [
  "ab_glyph_rasterizer",
@@ -1980,17 +1980,17 @@ dependencies = [
  "png",
  "sha2",
  "ttf-parser",
- "ttyshot-core",
+ "tuishot-core",
 ]
 
 [[package]]
-name = "ttyshot-term"
+name = "tuishot-term"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
  "nix 0.30.1",
  "regex",
- "ttyshot-core",
+ "tuishot-core",
 ]
 
 [[package]]

@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ttyshot-action-tests.XXXXXX")"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/tuishot-action-tests.XXXXXX")"
 trap 'rm -rf "$TEST_ROOT"' EXIT
 export PATH="$TEST_ROOT/bin:$PATH"
 mkdir -p "$TEST_ROOT/bin"
 
-cat > "$TEST_ROOT/bin/ttyshot" <<'EOF'
+cat > "$TEST_ROOT/bin/tuishot" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 [[ "$1" == run ]]
@@ -71,13 +71,13 @@ case "$mode" in
     printf 'updated\n' > screenshots/existing.png
     ;;
   move-update)
-    git --git-dir="$FAKE_BARE" update-ref refs/heads/ttyshot/update-screenshots "$FAKE_MOVED_OID"
+    git --git-dir="$FAKE_BARE" update-ref refs/heads/tuishot/update-screenshots "$FAKE_MOVED_OID"
     printf 'updated\n' > screenshots/existing.png
     ;;
   *) exit 64 ;;
 esac
 EOF
-chmod +x "$TEST_ROOT/bin/ttyshot"
+chmod +x "$TEST_ROOT/bin/tuishot"
 
 cat > "$TEST_ROOT/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -88,18 +88,18 @@ for arg in "$@"; do printf ' <%q>' "$arg" >> "$FAKE_GH_LOG"; done
 printf '\n' >> "$FAKE_GH_LOG"
 if [[ "$1" == api ]]; then
   [[ "${FAKE_GH_API_FAIL:-false}" != true ]] || exit 77
-  oid="$(git --git-dir="$FAKE_BARE" rev-parse refs/heads/ttyshot/update-screenshots)"
+  oid="$(git --git-dir="$FAKE_BARE" rev-parse refs/heads/tuishot/update-screenshots)"
   case "${FAKE_GH_MODE:-none}" in
     none) ;;
     exact)
-      printf 'https://example.test/pull/3\tttyshot/update-screenshots\t%s\towner/repo\tmain\towner/repo\n' "$oid"
+      printf 'https://example.test/pull/3\ttuishot/update-screenshots\t%s\towner/repo\tmain\towner/repo\n' "$oid"
       ;;
     fork)
-      printf 'https://example.test/pull/99\tttyshot/update-screenshots\t%s\tforker/repo\tmain\towner/repo\n' "$oid"
+      printf 'https://example.test/pull/99\ttuishot/update-screenshots\t%s\tforker/repo\tmain\towner/repo\n' "$oid"
       ;;
     fork-and-exact)
-      printf 'https://example.test/pull/99\tttyshot/update-screenshots\t%s\tforker/repo\tmain\towner/repo\n' "$oid"
-      printf 'https://example.test/pull/3\tttyshot/update-screenshots\t%s\towner/repo\tmain\towner/repo\n' "$oid"
+      printf 'https://example.test/pull/99\ttuishot/update-screenshots\t%s\tforker/repo\tmain\towner/repo\n' "$oid"
+      printf 'https://example.test/pull/3\ttuishot/update-screenshots\t%s\towner/repo\tmain\towner/repo\n' "$oid"
       ;;
     *) exit 78 ;;
   esac
@@ -141,7 +141,7 @@ assert_not_contains() {
 
 assert_no_update_ref() {
   local bare="$1"
-  if git --git-dir="$bare" show-ref --verify --quiet refs/heads/ttyshot/update-screenshots; then
+  if git --git-dir="$bare" show-ref --verify --quiet refs/heads/tuishot/update-screenshots; then
     fail 'unexpected update branch was pushed'
   fi
 }
@@ -190,15 +190,15 @@ make_commit_object() {
     GIT_AUTHOR_NAME="$author_name" GIT_AUTHOR_EMAIL="$author_email" \
     GIT_COMMITTER_NAME="$author_name" GIT_COMMITTER_EMAIL="$author_email" \
     git -C "$FIXTURE" commit-tree "$tree" -p "$parent")"
-  git -C "$FIXTURE" push --quiet origin "$oid:refs/ttyshot-test/objects/${oid:0:12}"
+  git -C "$FIXTURE" push --quiet origin "$oid:refs/tuishot-test/objects/${oid:0:12}"
   printf '%s\n' "$oid"
 }
 
 make_owned_update() {
   local oid
-  oid="$(make_commit_object $'docs: prior update\n\nGenerated-by: ttyshot GitHub Action' \
+  oid="$(make_commit_object $'docs: prior update\n\nGenerated-by: tuishot GitHub Action' \
     'github-actions[bot]' '41898282+github-actions[bot]@users.noreply.github.com')"
-  git --git-dir="$BARE" update-ref refs/heads/ttyshot/update-screenshots "$oid"
+  git --git-dir="$BARE" update-ref refs/heads/tuishot/update-screenshots "$oid"
   printf '%s\n' "$oid"
 }
 
@@ -208,14 +208,14 @@ run_action() {
   (
     cd "$FIXTURE"
     env \
-      TTYSHOT_BIN="$TEST_ROOT/bin/ttyshot" \
-      TTYSHOT_SCENES=scene.toml \
-      TTYSHOT_ALLOWED_PATHS="$allowed" \
-      TTYSHOT_UPDATE_BRANCH=ttyshot/update-screenshots \
-      TTYSHOT_UPDATE_TITLE='docs: refresh fixture screenshots' \
-      TTYSHOT_PR_BODY="$TEST_PR_BODY" \
-      TTYSHOT_BASE_BRANCH=main \
-      TTYSHOT_DEFAULT_BASE=main \
+      TUISHOT_BIN="$TEST_ROOT/bin/tuishot" \
+      TUISHOT_SCENES=scene.toml \
+      TUISHOT_ALLOWED_PATHS="$allowed" \
+      TUISHOT_UPDATE_BRANCH=tuishot/update-screenshots \
+      TUISHOT_UPDATE_TITLE='docs: refresh fixture screenshots' \
+      TUISHOT_PR_BODY="$TEST_PR_BODY" \
+      TUISHOT_BASE_BRANCH=main \
+      TUISHOT_DEFAULT_BASE=main \
       GH_TOKEN=test-token \
       GITHUB_TOKEN=must-not-reach-scene \
       GITHUB_EVENT_NAME="$TEST_EVENT" \
@@ -257,12 +257,12 @@ assert_contains "$OUTPUT" 'changed=true'
 assert_contains "$OUTPUT" 'pr-url=https://example.test/pull/7'
 assert_contains "$GH_LOG" '<--body-file>'
 assert_contains "$GH_LOG" '<--repo> <owner/repo>'
-assert_contains "$GH_LOG" '<--head> <owner:ttyshot/update-screenshots>'
+assert_contains "$GH_LOG" '<--head> <owner:tuishot/update-screenshots>'
 assert_contains "$GH_LOG" 'Synthetic fixture update.'
-git --git-dir="$BARE" show refs/heads/ttyshot/update-screenshots:screenshots/existing.png | grep -Fx updated >/dev/null
-git --git-dir="$BARE" show refs/heads/ttyshot/update-screenshots:screenshots/new.png | grep -Fx new >/dev/null
+git --git-dir="$BARE" show refs/heads/tuishot/update-screenshots:screenshots/existing.png | grep -Fx updated >/dev/null
+git --git-dir="$BARE" show refs/heads/tuishot/update-screenshots:screenshots/new.png | grep -Fx new >/dev/null
 base_oid="$(git --git-dir="$BARE" rev-parse refs/heads/main)"
-parent_oid="$(git --git-dir="$BARE" show -s --format=%P refs/heads/ttyshot/update-screenshots)"
+parent_oid="$(git --git-dir="$BARE" show -s --format=%P refs/heads/tuishot/update-screenshots)"
 [[ "$parent_oid" == "$base_oid" ]] || fail 'generated commit parent is not the exact remote base'
 
 case_name 'scene cannot see tokens or checkout extraheaders'
@@ -287,10 +287,10 @@ assert_no_update_ref "$BARE"
 case_name 'spaces and literal pathspec-looking filenames are staged literally'
 new_fixture spaces spaces
 run_action 'screen shots'
-git --git-dir="$BARE" show 'refs/heads/ttyshot/update-screenshots:screen shots/output image.png' | grep -Fx spaced >/dev/null
+git --git-dir="$BARE" show 'refs/heads/tuishot/update-screenshots:screen shots/output image.png' | grep -Fx spaced >/dev/null
 new_fixture literal literal
 run_action ':(glob)screen'
-git --git-dir="$BARE" show 'refs/heads/ttyshot/update-screenshots::(glob)screen/*.png' | grep -Fx literal >/dev/null
+git --git-dir="$BARE" show 'refs/heads/tuishot/update-screenshots::(glob)screen/*.png' | grep -Fx literal >/dev/null
 
 case_name 'control characters in rejected paths are shell-quoted'
 new_fixture control control
@@ -330,7 +330,7 @@ assert_no_update_ref "$BARE"
 case_name 'update branch movement during scene is rejected'
 new_fixture update-move move-update
 make_owned_update >/dev/null
-TEST_MOVED_OID="$(make_commit_object $'docs: moved update\n\nGenerated-by: ttyshot GitHub Action' \
+TEST_MOVED_OID="$(make_commit_object $'docs: moved update\n\nGenerated-by: tuishot GitHub Action' \
   'github-actions[bot]' '41898282+github-actions[bot]@users.noreply.github.com')"
 if run_action screenshots >"$TEST_ROOT/update-move.log" 2>&1; then fail 'update movement run succeeded'; fi
 assert_contains "$TEST_ROOT/update-move.log" 'update branch moved during generation'
@@ -338,19 +338,19 @@ assert_contains "$TEST_ROOT/update-move.log" 'update branch moved during generat
 case_name 'replace refs cannot forge remote branch ownership'
 new_fixture replace-owner allowed
 malicious_oid="$(make_commit_object 'human commit' Human human@example.test)"
-git --git-dir="$BARE" update-ref refs/heads/ttyshot/update-screenshots "$malicious_oid"
-forged_oid="$(make_commit_object $'forged\n\nGenerated-by: ttyshot GitHub Action' \
+git --git-dir="$BARE" update-ref refs/heads/tuishot/update-screenshots "$malicious_oid"
+forged_oid="$(make_commit_object $'forged\n\nGenerated-by: tuishot GitHub Action' \
   'github-actions[bot]' '41898282+github-actions[bot]@users.noreply.github.com')"
 git -C "$FIXTURE" replace "$malicious_oid" "$forged_oid"
 if run_action screenshots >"$TEST_ROOT/replace-owner.log" 2>&1; then fail 'replace-forged ownership succeeded'; fi
 assert_contains "$TEST_ROOT/replace-owner.log" 'not marked as an action-owned branch'
-[[ "$(git --git-dir="$BARE" rev-parse refs/heads/ttyshot/update-screenshots)" == "$malicious_oid" ]] || fail 'malicious branch was overwritten'
+[[ "$(git --git-dir="$BARE" rev-parse refs/heads/tuishot/update-screenshots)" == "$malicious_oid" ]] || fail 'malicious branch was overwritten'
 
 case_name 'scene remote/config/replace/hook mutations cannot redirect or intercept publish'
 new_fixture config-attack config-attack
 run_action screenshots
 [[ ! -e "$HOOK_MARKER" ]] || fail 'scene-provided commit hook ran'
-git --git-dir="$BARE" show refs/heads/ttyshot/update-screenshots:screenshots/existing.png | grep -Fx 'safe destination' >/dev/null
+git --git-dir="$BARE" show refs/heads/tuishot/update-screenshots:screenshots/existing.png | grep -Fx 'safe destination' >/dev/null
 assert_no_update_ref "$EVIL_BARE"
 
 case_name 'exact same-repository PR is reused and same-name fork PR is ignored'
@@ -372,7 +372,7 @@ if run_action screenshots >"$TEST_ROOT/api-failure.log" 2>&1; then fail 'API fai
 assert_contains "$OUTPUT" 'changed=true'
 assert_contains "$OUTPUT" 'pr-url='
 if grep -E '^pr-url=.+$' "$OUTPUT" >/dev/null; then fail 'API failure wrote a PR URL'; fi
-git --git-dir="$BARE" show-ref --verify --quiet refs/heads/ttyshot/update-screenshots || fail 'API failure lost pushed branch'
+git --git-dir="$BARE" show-ref --verify --quiet refs/heads/tuishot/update-screenshots || fail 'API failure lost pushed branch'
 assert_contains "$TEST_ROOT/api-failure.log" 'fork policy'
 
 case_name 'PR create failure after push leaves changed=true and empty pr-url'
@@ -381,7 +381,7 @@ TEST_GH_CREATE_FAIL=true
 if run_action screenshots >"$TEST_ROOT/create-failure.log" 2>&1; then fail 'create failure run succeeded'; fi
 assert_contains "$OUTPUT" 'changed=true'
 if grep -E '^pr-url=.+$' "$OUTPUT" >/dev/null; then fail 'create failure wrote a PR URL'; fi
-git --git-dir="$BARE" show-ref --verify --quiet refs/heads/ttyshot/update-screenshots || fail 'create failure lost pushed branch'
+git --git-dir="$BARE" show-ref --verify --quiet refs/heads/tuishot/update-screenshots || fail 'create failure lost pushed branch'
 assert_contains "$TEST_ROOT/create-failure.log" 'pull-requests: write permission'
 
 case_name 'push permission failure explains contents permission and never calls gh'
@@ -404,7 +404,7 @@ case_name 'action build boundary ignores consumer Rust wrappers/config'
 action_file="$ROOT/action.yml"
 assert_contains "$ROOT/scripts/github-action.sh" 'GIT_TERMINAL_PROMPT=0'
 assert_contains "$action_file" "cd -- \"\$GITHUB_ACTION_PATH\""
-assert_contains "$action_file" 'ttyshot-cargo-home.XXXXXX'
+assert_contains "$action_file" 'tuishot-cargo-home.XXXXXX'
 assert_contains "$action_file" 'unset RUSTC_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_RUSTC_WRAPPER'
 assert_contains "$action_file" "export CARGO_HOME=\"\$cargo_home\""
 assert_contains "$action_file" "--target \"\$target_triple\""
