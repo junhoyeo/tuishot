@@ -26,3 +26,12 @@ jobs:
           cargo test -p ttyshot-ratatui --locked
           cargo test -p ttyshot-ratatui --no-default-features --features ratatui-0-30 --locked
           cargo check -p ttyshot-ratatui --no-default-features --locked
+
+  deny:
+    name: Linux / cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
