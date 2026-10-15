@@ -10,6 +10,8 @@ yanked = "deny"
 ignore = [
     # fontdue currently depends on ttf-parser; this advisory reports maintenance status, not a vulnerability.
     "RUSTSEC-2026-0192",
+    # Ratatui 0.29 (the first-party compatibility target) depends on archived paste; no safe upgrade exists.
+    "RUSTSEC-2024-0436",
 ]
 
 [licenses]

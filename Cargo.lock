@@ -1782,6 +1782,7 @@ dependencies = [
  "ratatui 0.30.2",
  "serde_json",
  "ttyshot-core",
+ "ttyshot-render",
  "unicode-width 0.2.0",
 ]
 

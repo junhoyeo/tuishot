@@ -4,16 +4,26 @@
 //! 0.30. Ratatui 0.29 is enabled by default for the first-party consumer. Both
 //! features can be enabled in the same build.
 //!
-//! This crate only adapts buffers to [`ttyshot_core::Grid`]. Image snapshots
-//! will be added after the renderer lands rather than duplicated here.
+//! Buffers can be converted to [`ttyshot_core::Grid`] or rendered directly to
+//! PNG and SVG without starting a terminal or PTY. The `snapshot_*` helpers use
+//! only the bundled font so their output is stable across supported systems.
 
-use std::{error::Error, fmt};
+use std::{
+    error::Error,
+    ffi::OsString,
+    fmt, fs,
+    io::Write,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 #[cfg(any(feature = "ratatui-0-29", feature = "ratatui-0-30"))]
 use ttyshot_core::{Attributes, Blink, CellWidth, Color, Rgb, Style, Underline};
 use ttyshot_core::{Grid, GridError};
 
 pub use ttyshot_core as core;
+pub use ttyshot_render as render;
+pub use ttyshot_render::{FontMode, FontSource, Padding, RenderOptions, WindowChrome};
 
 /// A Ratatui buffer that can be converted into a ttyshot grid.
 pub trait BufferExt {
@@ -65,7 +75,158 @@ pub fn snapshot_json<B: BufferExt + ?Sized>(buffer: &B) -> Result<String, Adapte
     serde_json::to_string_pretty(&grid).map_err(AdapterError::Serialize)
 }
 
-/// A Ratatui buffer could not be represented as a ttyshot grid.
+/// Renders a supported Ratatui buffer to PNG bytes with the supplied options.
+///
+/// This is the general image API. Set [`RenderOptions::font_mode`] to
+/// [`FontMode::Deterministic`] when the result will be compared as a snapshot.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion or rendering fails.
+pub fn render_png<B: BufferExt + ?Sized>(
+    buffer: &B,
+    options: RenderOptions,
+) -> Result<Vec<u8>, AdapterError> {
+    let grid = to_grid(buffer)?;
+    let renderer = ttyshot_render::Renderer::new(options).map_err(AdapterError::Render)?;
+    renderer.render_png(&grid).map_err(AdapterError::Render)
+}
+
+/// Renders a supported Ratatui buffer to a standalone SVG document.
+///
+/// This is the general image API. Set [`RenderOptions::font_mode`] to
+/// [`FontMode::Deterministic`] when the result will be compared as a snapshot.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion or rendering fails.
+pub fn render_svg<B: BufferExt + ?Sized>(
+    buffer: &B,
+    options: RenderOptions,
+) -> Result<String, AdapterError> {
+    let grid = to_grid(buffer)?;
+    let renderer = ttyshot_render::Renderer::new(options).map_err(AdapterError::Render)?;
+    renderer.render_svg(&grid).map_err(AdapterError::Render)
+}
+
+/// Returns renderer options suitable for byte-for-byte image snapshots.
+///
+/// Unlike [`RenderOptions::default`], these options disable installed system
+/// font discovery. Add explicit fallback fonts if a fixture needs deterministic
+/// CJK glyph shapes. Cell footprints remain exact without a fallback, but the
+/// bundled font does not promise CJK coverage. Emoji and platform-specific ZWJ
+/// composition are best-effort and are not portable snapshot content.
+#[must_use]
+pub fn snapshot_render_options() -> RenderOptions {
+    RenderOptions {
+        font_mode: FontMode::Deterministic,
+        ..RenderOptions::default()
+    }
+}
+
+/// Renders deterministic PNG bytes for snapshot comparison.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion or rendering fails.
+pub fn snapshot_png<B: BufferExt + ?Sized>(buffer: &B) -> Result<Vec<u8>, AdapterError> {
+    render_png(buffer, snapshot_render_options())
+}
+
+/// Renders a deterministic standalone SVG document for snapshot comparison.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion or rendering fails.
+pub fn snapshot_svg<B: BufferExt + ?Sized>(buffer: &B) -> Result<String, AdapterError> {
+    render_svg(buffer, snapshot_render_options())
+}
+
+/// Atomically writes a deterministic PNG snapshot, creating parent directories as needed.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion, rendering, or writing fails.
+pub fn write_snapshot_png<B: BufferExt + ?Sized>(
+    buffer: &B,
+    path: impl AsRef<Path>,
+) -> Result<(), AdapterError> {
+    let bytes = snapshot_png(buffer)?;
+    write_snapshot(path.as_ref(), &bytes)
+}
+
+/// Atomically writes a deterministic SVG snapshot, creating parent directories as needed.
+///
+/// # Errors
+///
+/// Returns [`AdapterError`] when conversion, rendering, or writing fails.
+pub fn write_snapshot_svg<B: BufferExt + ?Sized>(
+    buffer: &B,
+    path: impl AsRef<Path>,
+) -> Result<(), AdapterError> {
+    let svg = snapshot_svg(buffer)?;
+    write_snapshot(path.as_ref(), svg.as_bytes())
+}
+
+fn write_snapshot(path: &Path, contents: &[u8]) -> Result<(), AdapterError> {
+    static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
+
+    let directory = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(directory).map_err(|error| snapshot_io_error(directory, error))?;
+    let file_name = path.file_name().ok_or_else(|| {
+        snapshot_io_error(
+            path,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "snapshot path must name a file",
+            ),
+        )
+    })?;
+
+    let (temporary_path, mut temporary_file) = loop {
+        let sequence = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
+        let mut temporary_name = OsString::from(".");
+        temporary_name.push(file_name);
+        temporary_name.push(format!(".ttyshot-{}-{sequence}.tmp", std::process::id()));
+        let temporary_path = directory.join(temporary_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => break (temporary_path, file),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(snapshot_io_error(path, error)),
+        }
+    };
+
+    let write_result = temporary_file
+        .write_all(contents)
+        .and_then(|()| temporary_file.flush())
+        .and_then(|()| temporary_file.sync_all());
+    drop(temporary_file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(snapshot_io_error(path, error));
+    }
+    if let Err(error) = fs::rename(&temporary_path, path) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(snapshot_io_error(path, error));
+    }
+    Ok(())
+}
+
+fn snapshot_io_error(path: &Path, error: std::io::Error) -> AdapterError {
+    AdapterError::Io {
+        path: path.to_path_buf(),
+        error,
+    }
+}
+
+/// A Ratatui buffer could not be converted, rendered, serialized, or written.
 #[derive(Debug)]
 pub enum AdapterError {
     /// Ratatui permits a zero-sized buffer, while ttyshot grids are non-empty.
@@ -107,6 +268,15 @@ pub enum AdapterError {
     Core(GridError),
     /// A JSON snapshot could not be serialized.
     Serialize(serde_json::Error),
+    /// The ttyshot renderer rejected the options or could not produce an image.
+    Render(ttyshot_render::RenderError),
+    /// A snapshot directory or file could not be written.
+    Io {
+        /// Path that could not be created or written.
+        path: PathBuf,
+        /// Underlying file-system error.
+        error: std::io::Error,
+    },
 }
 
 impl fmt::Display for AdapterError {
@@ -135,6 +305,14 @@ impl fmt::Display for AdapterError {
             Self::Serialize(error) => {
                 write!(formatter, "could not serialize grid snapshot: {error}")
             }
+            Self::Render(error) => write!(formatter, "could not render buffer: {error}"),
+            Self::Io { path, error } => {
+                write!(
+                    formatter,
+                    "could not write snapshot at {}: {error}",
+                    path.display()
+                )
+            }
         }
     }
 }
@@ -144,6 +322,8 @@ impl Error for AdapterError {
         match self {
             Self::Core(error) => Some(error),
             Self::Serialize(error) => Some(error),
+            Self::Render(error) => Some(error),
+            Self::Io { error, .. } => Some(error),
             _ => None,
         }
     }
@@ -363,7 +543,8 @@ mod v30 {
                     crossed_out: modifiers.contains(Modifier::CROSSED_OUT),
                 }),
             },
-            skipped: cell.skip || cell.diff_option == CellDiffOption::Skip,
+            skipped: cell.diff_option == CellDiffOption::Skip
+                || (cell.skip && cell.diff_option == CellDiffOption::None),
         }
     }
 
@@ -394,7 +575,12 @@ mod v30 {
 
 #[cfg(all(test, any(feature = "ratatui-0-29", feature = "ratatui-0-30")))]
 mod tests {
-    use super::{AdapterError, snapshot_json, snapshot_text, to_grid};
+    #[cfg(feature = "ratatui-0-29")]
+    use std::error::Error as _;
+
+    use super::{AdapterError, snapshot_json, snapshot_png, snapshot_svg, snapshot_text, to_grid};
+    #[cfg(feature = "ratatui-0-29")]
+    use super::{FontMode, RenderOptions, render_png, write_snapshot_png, write_snapshot_svg};
     use ttyshot_core::{Blink, CellWidth, Color, Grid, Rgb, Underline};
 
     fn assert_wide_grid(grid: &Grid) {
@@ -560,6 +746,194 @@ mod tests {
         assert!(first.contains("\"width\": \"single\""));
     }
 
+    #[cfg(feature = "ratatui-0-29")]
+    fn synthetic_0_29() -> ratatui_0_29::buffer::Buffer {
+        use ratatui_0_29::{
+            buffer::Buffer,
+            layout::Rect,
+            style::{Color as RatatuiColor, Modifier, Style as RatatuiStyle},
+        };
+
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let base = RatatuiStyle::default()
+            .fg(RatatuiColor::Rgb(220, 230, 240))
+            .bg(RatatuiColor::Indexed(17));
+        buffer.set_style(Rect::new(0, 0, 6, 2), base);
+        buffer.set_string(
+            0,
+            0,
+            "A界┼█z",
+            base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                .underline_color(RatatuiColor::Rgb(240, 80, 160)),
+        );
+        buffer.set_string(
+            0,
+            1,
+            "colors",
+            RatatuiStyle::default()
+                .fg(RatatuiColor::LightCyan)
+                .bg(RatatuiColor::Rgb(20, 30, 40))
+                .add_modifier(Modifier::ITALIC | Modifier::CROSSED_OUT),
+        );
+        buffer
+    }
+
+    #[cfg(feature = "ratatui-0-30")]
+    fn synthetic_0_30() -> ratatui_0_30::buffer::Buffer {
+        use ratatui_0_30::{
+            buffer::Buffer,
+            layout::Rect,
+            style::{Color as RatatuiColor, Modifier, Style as RatatuiStyle},
+        };
+
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 6, 2));
+        let base = RatatuiStyle::default()
+            .fg(RatatuiColor::Rgb(220, 230, 240))
+            .bg(RatatuiColor::Indexed(17));
+        buffer.set_style(Rect::new(0, 0, 6, 2), base);
+        buffer.set_string(
+            0,
+            0,
+            "A界┼█z",
+            base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+                .underline_color(RatatuiColor::Rgb(240, 80, 160)),
+        );
+        buffer.set_string(
+            0,
+            1,
+            "colors",
+            RatatuiStyle::default()
+                .fg(RatatuiColor::LightCyan)
+                .bg(RatatuiColor::Rgb(20, 30, 40))
+                .add_modifier(Modifier::ITALIC | Modifier::CROSSED_OUT),
+        );
+        buffer
+    }
+
+    fn assert_cjk_footprint(grid: &Grid) {
+        assert_eq!(grid.get(1, 0).expect("CJK cell").symbol, "界");
+        assert_eq!(grid.get(1, 0).expect("CJK cell").width, CellWidth::Wide);
+        assert_eq!(
+            grid.get(2, 0).expect("CJK continuation").width,
+            CellWidth::Continuation
+        );
+    }
+
+    #[cfg(feature = "ratatui-0-29")]
+    #[test]
+    fn renders_deterministic_images_from_ratatui_0_29() {
+        let buffer = synthetic_0_29();
+        let grid = to_grid(&buffer).expect("0.29 buffer converts");
+        assert_cjk_footprint(&grid);
+        let png = snapshot_png(&buffer).expect("0.29 PNG renders");
+        let svg = snapshot_svg(&buffer).expect("0.29 SVG renders");
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(svg.starts_with("<svg "));
+        assert_eq!(png, snapshot_png(&buffer).expect("PNG repeats"));
+        assert_eq!(svg, snapshot_svg(&buffer).expect("SVG repeats"));
+    }
+
+    #[cfg(feature = "ratatui-0-30")]
+    #[test]
+    fn renders_deterministic_images_from_ratatui_0_30() {
+        let buffer = synthetic_0_30();
+        let grid = to_grid(&buffer).expect("0.30 buffer converts");
+        assert_cjk_footprint(&grid);
+        let png = snapshot_png(&buffer).expect("0.30 PNG renders");
+        let svg = snapshot_svg(&buffer).expect("0.30 SVG renders");
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(svg.starts_with("<svg "));
+        assert_eq!(png, snapshot_png(&buffer).expect("PNG repeats"));
+        assert_eq!(svg, snapshot_svg(&buffer).expect("SVG repeats"));
+    }
+
+    #[cfg(all(feature = "ratatui-0-29", feature = "ratatui-0-30"))]
+    #[test]
+    fn supported_versions_produce_identical_grids_pngs_and_svgs() {
+        let old = synthetic_0_29();
+        let new = synthetic_0_30();
+        assert_eq!(to_grid(&old).unwrap(), to_grid(&new).unwrap());
+        assert_eq!(snapshot_png(&old).unwrap(), snapshot_png(&new).unwrap());
+        assert_eq!(snapshot_svg(&old).unwrap(), snapshot_svg(&new).unwrap());
+    }
+
+    #[cfg(feature = "ratatui-0-29")]
+    #[test]
+    fn renderer_errors_are_preserved_as_sources() {
+        let error = render_png(
+            &synthetic_0_29(),
+            RenderOptions {
+                scale: 0,
+                font_mode: FontMode::Deterministic,
+                ..RenderOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, AdapterError::Render(_)));
+        assert!(error.source().is_some());
+    }
+
+    #[cfg(feature = "ratatui-0-29")]
+    #[test]
+    fn image_snapshot_writers_create_parent_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "ttyshot-ratatui-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("image-writer")
+        ));
+        let png_path = root.join("nested/snapshot.png");
+        let svg_path = root.join("nested/snapshot.svg");
+        let buffer = synthetic_0_29();
+
+        write_snapshot_png(&buffer, &png_path).expect("PNG snapshot writes");
+        write_snapshot_svg(&buffer, &svg_path).expect("SVG snapshot writes");
+        write_snapshot_png(&buffer, &png_path).expect("PNG snapshot replaces atomically");
+        assert_eq!(
+            std::fs::read(&png_path).unwrap(),
+            snapshot_png(&buffer).unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(&svg_path).unwrap(),
+            snapshot_svg(&buffer).unwrap()
+        );
+        assert!(
+            std::fs::read_dir(root.join("nested"))
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("ttyshot-")),
+            "successful writes must not leave temporary files"
+        );
+        std::fs::remove_dir_all(root).expect("temporary snapshots clean up");
+    }
+
+    #[cfg(feature = "ratatui-0-29")]
+    #[test]
+    fn failed_snapshot_replace_keeps_destination_and_cleans_temporary_file() {
+        let root = std::env::temp_dir().join(format!(
+            "ttyshot-ratatui-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("failed-writer")
+        ));
+        let destination = root.join("accepted.png");
+        std::fs::create_dir_all(&destination).expect("directory sentinel is created");
+
+        let error = write_snapshot_png(&synthetic_0_29(), &destination).unwrap_err();
+        assert!(matches!(error, AdapterError::Io { .. }));
+        assert!(destination.is_dir(), "failed rename must keep destination");
+        assert!(
+            std::fs::read_dir(&root).unwrap().all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("ttyshot-")),
+            "failed writes must not leave temporary files"
+        );
+        std::fs::remove_dir_all(root).expect("temporary snapshots clean up");
+    }
+
     fn assert_skipped(error: &AdapterError, expected_x: u16, expected_y: u16) {
         assert!(
             matches!(
@@ -601,5 +975,16 @@ mod tests {
         let mut legacy = Buffer::empty(Rect::new(0, 0, 2, 1));
         legacy[(1, 0)].set_symbol("y").set_skip(true);
         assert_skipped(&to_grid(&legacy).unwrap_err(), 1, 0);
+
+        let mut overridden = Buffer::empty(Rect::new(0, 0, 1, 1));
+        overridden[(0, 0)]
+            .set_symbol("z")
+            .set_skip(true)
+            .set_diff_option(CellDiffOption::AlwaysUpdate);
+        assert_eq!(
+            to_grid(&overridden).unwrap().get(0, 0).unwrap().symbol,
+            "z",
+            "AlwaysUpdate overrides the deprecated skip flag in Ratatui's diff contract"
+        );
     }
 }
