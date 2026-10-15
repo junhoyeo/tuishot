@@ -29,6 +29,17 @@ jobs:
           cargo test -p tuishot-ratatui --no-default-features --features ratatui-0-30 --locked
           cargo check -p tuishot-ratatui --no-default-features --locked
 
+  macos:
+    name: macOS / stable
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features --locked -- --test-threads=1
+      - name: Render synthetic scene example
+        run: cargo run --locked -p tuishot -- run crates/tuishot/examples/synthetic.toml
+
   deny:
     name: Linux / cargo-deny
     runs-on: ubuntu-latest
