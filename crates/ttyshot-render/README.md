@@ -2,8 +2,9 @@
 
 Deterministic PNG and standalone SVG rendering for `ttyshot-core::Grid`.
 
-- Box drawing, block elements, Braille, sextants, octants, and Powerline
-  separators U+E0B0–U+E0B7 use integer procedural geometry.
+- Box drawing, block elements, Braille, sextants, octants, Powerline
+  separators U+E0B0–U+E0B7, and common scrollbar glyphs `▴▮▾` use integer
+  procedural geometry.
 - JetBrains Mono Regular 2.304 is bundled under the exact SIL Open Font
   License 1.1 text in `assets/OFL-JetBrainsMono.txt`. Its release URL and
   SHA-256 are pinned in `assets/FONT-LICENSES.toml` and checked by tests.
