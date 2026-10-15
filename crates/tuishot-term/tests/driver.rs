@@ -364,17 +364,44 @@ fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
 fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
     let pid_file = unique_pid_file("leader-exit");
     let fifo_file = pid_file.with_extension("fifo");
+    let ready_file = pid_file.with_extension("ready");
+    // Do not let the leader exit until the descendant has installed its signal
+    // dispositions. The PTY release below makes that ordering deterministic.
     let script = format!(
-        "/usr/bin/mkfifo '{}'; (trap '' HUP TERM; exec /bin/cat '{}') & child=$!; printf '%s %s\n' \"$$\" \"$child\" > '{}'; printf LEADER_EXITED; exit 0",
-        fifo_file.display(),
-        fifo_file.display(),
-        pid_file.display()
+        r#"
+/usr/bin/mkfifo '{fifo}' '{ready}'
+(
+    trap '' HUP TERM
+    printf 'ready\n' > '{ready}'
+    exec /bin/cat '{fifo}'
+) &
+child=$!
+IFS= read -r ready < '{ready}'
+[ "$ready" = ready ] || exit 90
+printf '%s %s\n' "$$" "$child" > '{pid}'
+printf DESCENDANT_READY
+IFS= read -r release
+[ "$release" = release ] || exit 91
+printf LEADER_EXITED
+exit 0
+"#,
+        fifo = fifo_file.display(),
+        ready = ready_file.display(),
+        pid = pid_file.display()
     );
-    let session = shell_session(&script, Size::new(50, 4), Duration::from_millis(250));
+    let session = shell_session(&script, Size::new(50, 4), Duration::from_secs(1));
     session
-        .wait_text("LEADER_EXITED", Duration::from_millis(200))
+        .wait_text("DESCENDANT_READY", Duration::from_secs(1))
         .unwrap();
     let process_group = read_process_group(&pid_file);
+    assert_eq!(killpg(process_group, None), Ok(()));
+
+    session.type_text("release").unwrap();
+    session.key(Key::Enter).unwrap();
+    session
+        .wait_text("LEADER_EXITED", Duration::from_secs(1))
+        .unwrap();
+    assert_eq!(killpg(process_group, None), Ok(()));
 
     assert_process_group_gone(process_group);
     let error = session
@@ -385,6 +412,7 @@ fn hard_deadline_kills_descendants_after_the_group_leader_exits() {
     drop(session);
     fs::remove_file(pid_file).unwrap();
     fs::remove_file(fifo_file).unwrap();
+    fs::remove_file(ready_file).unwrap();
 }
 
 #[test]
