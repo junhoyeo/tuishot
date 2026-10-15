@@ -1,4 +1,4 @@
-![ttyshot — exact terminal screenshots and a geometry comparison](docs/assets/hero/ttyshot-hero.png)
+![ttyshot collage showing Tokscale, LazyGit, Ratatui, and Yazi](docs/assets/hero/ttyshot-hero.png)
 
 # ttyshot
 
@@ -19,14 +19,19 @@ The command runs at exactly `120x40`, waits for `Ready`, writes `dashboard.png`,
 
 ## Gallery
 
+Open any image for the full-resolution ttyshot capture.
+
 <table>
   <tr>
-    <td width="50%"><strong>Tokscale</strong><br><sub>75 days of synthetic usage</sub><br><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered by ttyshot"></td>
-    <td width="50%"><strong>LazyGit</strong><br><sub>throwaway repository, no remotes</sub><br><img src="docs/assets/gallery/lazygit.png" alt="LazyGit showing a synthetic demo repository"></td>
+    <td width="50%"><strong>Tokscale</strong><br><sub>75-day generated usage dataset</sub><br><a href="docs/assets/gallery/tokscale.png"><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered from a generated usage dataset by ttyshot"></a></td>
+    <td width="50%"><strong>LazyGit</strong><br><sub>Orbit Notes working tree</sub><br><a href="docs/assets/gallery/lazygit.png"><img src="docs/assets/gallery/lazygit.png" alt="LazyGit showing the generated Orbit Notes project"></a></td>
   </tr>
   <tr>
-    <td width="50%"><strong>Yazi</strong><br><sub>isolated demo directory</sub><br><img src="docs/assets/gallery/yazi.png" alt="Yazi showing neutral synthetic files"></td>
-    <td width="50%"><strong>Vim</strong><br><sub>read-only synthetic dashboard</sub><br><img src="docs/assets/gallery/vim.png" alt="Vim showing a synthetic terminal dashboard"></td>
+    <td width="50%"><strong>Ratatui demo2</strong><br><sub>official showcase application</sub><br><a href="docs/assets/gallery/ratatui.png"><img src="docs/assets/gallery/ratatui.png" alt="Official Ratatui demo2 rendered by ttyshot"></a></td>
+    <td width="50%"><strong>Helix</strong><br><sub>Rust code in Catppuccin Mocha</sub><br><a href="docs/assets/gallery/helix.png"><img src="docs/assets/gallery/helix.png" alt="Helix showing generated syntax-highlighted Rust code"></a></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>Yazi</strong><br><sub>Aurora UI Kit directory</sub><br><a href="docs/assets/gallery/yazi.png"><img src="docs/assets/gallery/yazi.png" alt="Yazi showing the generated Aurora UI Kit directory"></a></td>
   </tr>
 </table>
 
@@ -74,6 +79,8 @@ See the validated v1 schema and key grammar in [`docs/scene-format.md`](docs/sce
 
 
 ## What makes the output exact
+
+![Comparison showing gaps between font-rendered block glyphs and seamless ttyshot cell geometry](docs/assets/hero/geometry-comparison.png)
 
 - **One cell model.** Text, colors, SGR attributes, cursor state, and wide-cell continuations survive PTY, Ratatui, PNG, SVG, text, and JSON paths.
 - **Terminal geometry.** `U+2500–257F`, `U+2580–259F`, `U+2800–28FF`, legacy sextants/octants, Powerline separators, and common scrollbar glyphs are shapes aligned to cell edges.
