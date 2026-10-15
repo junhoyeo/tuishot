@@ -10,4 +10,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alacritty_terminal = { version = "0.26.0", default-features = false }
+nix = { version = "0.30.1", features = ["process", "signal"] }
+regex = { version = "1.12.2", default-features = false, features = ["perf", "std", "unicode-perl"] }
 ttyshot-core = { path = "../ttyshot-core" }
