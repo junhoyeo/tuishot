@@ -215,4 +215,4 @@ Checked against project documentation and source on 2026-10-15. “Different foc
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option. The bundled JetBrains Mono font has its own SIL Open Font License 1.1 file.
+Licensed under the [MIT License](LICENSE-MIT). The bundled JetBrains Mono font has its own SIL Open Font License 1.1 file.
