@@ -1,0 +1,31 @@
+# Copy this file into .github/workflows/ttyshot.yml in a consumer repository.
+# Use synthetic fixtures only: screenshots and failure logs can become public.
+name: Refresh terminal screenshots
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  screenshots:
+    # The action is Linux-only while the ttyshot repository is private.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the base branch
+        uses: actions/checkout@v4
+
+      - name: Refresh synthetic fixture screenshots
+        id: ttyshot
+        uses: junhoyeo/ttyshot@v0
+        with:
+          scenes: fixtures/readme/ttyshot.toml
+          paths: |
+            docs/screenshots
+            README-assets/terminal overview.png
+          branch: ttyshot/update-screenshots
+          title: "docs: refresh terminal screenshots"
