@@ -364,7 +364,7 @@ fn every_procedural_range_renders_at_one_and_two_x() {
             ..RenderOptions::default()
         })
         .unwrap();
-        assert!(!renderer.render_png(&grid).unwrap().is_empty());
+        assert_ne!(renderer.render_png(&grid).unwrap(), Vec::<u8>::new());
         assert!(renderer.render_svg(&grid).unwrap().ends_with("</svg>"));
     }
 }
