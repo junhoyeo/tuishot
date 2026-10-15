@@ -21,3 +21,6 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = "deny"
 pedantic = "deny"
+
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
