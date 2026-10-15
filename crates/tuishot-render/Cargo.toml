@@ -5,9 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/tuishot-render"
 description = "Deterministic PNG and SVG renderer for tuishot terminal cell grids"
 readme = "README.md"
-include = ["src/**", "assets/JetBrainsMono-Regular.ttf", "assets/OFL-JetBrainsMono.txt", "assets/FONT-LICENSES.toml", "README.md", "Cargo.toml"]
+keywords = ["terminal", "tui", "renderer", "screenshot", "svg"]
+categories = ["rendering"]
+include = ["src/**", "examples/**", "assets/JetBrainsMono-Regular.ttf", "assets/OFL-JetBrainsMono.txt", "assets/FONT-LICENSES.toml", "README.md", "LICENSE-MIT", "Cargo.toml"]
 
 [lints]
 workspace = true
@@ -17,7 +21,7 @@ ab_glyph_rasterizer = "0.1.8"
 fontdue = "0.9.3"
 png = "0.18.1"
 ttf-parser = "0.25.1"
-tuishot-core = { path = "../tuishot-core" }
+tuishot-core = { version = "0.1.0", path = "../tuishot-core" }
 
 [dev-dependencies]
 sha2 = "0.10.9"
