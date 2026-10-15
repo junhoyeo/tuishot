@@ -1,0 +1,36 @@
+{
+  "name": "tuishot-workspace",
+  "private": true,
+  "workspaces": [
+    "npm/cli",
+    "npm/tuishot"
+  ],
+  "scripts": {
+    "sync:packages": "node npm/scripts/sync-packages.mjs",
+    "check:packages": "node npm/scripts/sync-packages.mjs --check",
+    "build:npm": "npm run build --workspace @tuishot/cli",
+    "typecheck:npm": "npm run typecheck --workspace @tuishot/cli",
+    "test:npm": "npm run test --workspace @tuishot/cli",
+    "test:npm:integration": "npm run build:npm && node npm/scripts/integration.mjs",
+    "test:npm:release-generation": "node npm/scripts/test-release-generation.mjs",
+    "pack:npm:dry-run": "npm pack --dry-run --workspace @tuishot/cli && npm pack --dry-run --workspace tuishot",
+    "generate:platform": "node npm/scripts/generate-platform-package.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@tuishot/cli-darwin-arm64": "file:npm/platforms/aarch64-apple-darwin",
+    "@tuishot/cli-darwin-x64": "file:npm/platforms/x86_64-apple-darwin",
+    "@tuishot/cli-linux-x64-gnu": "file:npm/platforms/x86_64-unknown-linux-gnu",
+    "@tuishot/cli-linux-x64-musl": "file:npm/platforms/x86_64-unknown-linux-musl",
+    "@tuishot/cli-linux-arm64-gnu": "file:npm/platforms/aarch64-unknown-linux-gnu",
+    "@tuishot/cli-linux-arm64-musl": "file:npm/platforms/aarch64-unknown-linux-musl",
+    "@tuishot/cli-win32-x64-msvc": "file:npm/platforms/x86_64-pc-windows-msvc",
+    "@tuishot/cli-win32-arm64-msvc": "file:npm/platforms/aarch64-pc-windows-msvc"
+  }
+}

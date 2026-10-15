@@ -48,3 +48,36 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  npm:
+    name: npm / Node 18 / packed consumer
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.target
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> .target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+      - name: Install JavaScript dependencies without native optional packages
+        run: npm ci --omit=optional
+      - name: Check Cargo/npm version and target-package coherence
+        run: npm run check:packages
+      - name: Build ESM, CommonJS, and declarations
+        run: npm run build:npm
+      - name: Type-check the public API
+        run: npm run typecheck:npm
+      - name: Run npm unit tests
+        run: npm run test:npm
+      - name: Test release package generation
+        run: npm run test:npm:release-generation
+      - name: Test clean packed consumer against the real native binary
+        run: npm run test:npm:integration
+      - name: Inspect source package contents
+        run: npm run pack:npm:dry-run
