@@ -1,10 +1,12 @@
+![ttyshot collage showing Tokscale, LazyGit, Ratatui, and Yazi](docs/assets/hero/ttyshot-hero.png)
+
 # ttyshot
 
 **Screenshots of any TUI that look like a real terminal — and stay up to date.**
 
-`ttyshot` drives an interactive terminal program in a real PTY, waits for the screen you asked for, and renders the terminal cell grid to deterministic PNG, SVG, text, or JSON. Box drawing, blocks, Braille, sextants, octants, and Powerline separators use cell geometry instead of font glyphs, so charts and borders join without seams.
-
-> **Status:** v0.1 is in development. The repository stays private until the launch checklist is complete. No package has been published.
+- **Seam-free terminal graphics.** Boxes, blocks, Braille, sextants, octants, Powerline, and scrollbars use cell geometry.
+- **State-based capture.** Wait for text, regex, absence, or stability instead of guessing a sleep.
+- **One frame, four formats.** Export PNG, SVG, rectangular text, and styled JSON from the same grid.
 
 ## 30-second quick start
 
@@ -13,9 +15,27 @@ cargo install --git https://github.com/junhoyeo/ttyshot --locked
 ttyshot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
 ```
 
-The command runs at exactly `120x40`, waits until `Ready` is visible, writes `dashboard.png`, and terminates the complete child process group. Every wait has a deadline. A timeout names the failed condition and prints the last screen.
+The command runs at exactly `120x40`, waits for `Ready`, writes `dashboard.png`, and terminates the complete child process group. A timeout names the failed condition and prints the last screen.
 
-Prebuilt macOS and Linux archives are planned but not published. Target and verification details are in [`docs/distribution-plan.md`](docs/distribution-plan.md).
+## Gallery
+
+Open any image for the full-resolution ttyshot capture.
+
+<table>
+  <tr>
+    <td width="50%"><strong>Tokscale</strong><br><sub>75-day generated usage dataset</sub><br><a href="docs/assets/gallery/tokscale.png"><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered from a generated usage dataset by ttyshot"></a></td>
+    <td width="50%"><strong>LazyGit</strong><br><sub>Orbit Notes working tree</sub><br><a href="docs/assets/gallery/lazygit.png"><img src="docs/assets/gallery/lazygit.png" alt="LazyGit showing the generated Orbit Notes project"></a></td>
+  </tr>
+  <tr>
+    <td width="50%"><strong>Ratatui demo2</strong><br><sub>official showcase application</sub><br><a href="docs/assets/gallery/ratatui.png"><img src="docs/assets/gallery/ratatui.png" alt="Official Ratatui demo2 rendered by ttyshot"></a></td>
+    <td width="50%"><strong>Helix</strong><br><sub>Rust code in Catppuccin Mocha</sub><br><a href="docs/assets/gallery/helix.png"><img src="docs/assets/gallery/helix.png" alt="Helix showing generated syntax-highlighted Rust code"></a></td>
+  </tr>
+  <tr>
+    <td colspan="2"><strong>Yazi</strong><br><sub>Aurora UI Kit directory</sub><br><a href="docs/assets/gallery/yazi.png"><img src="docs/assets/gallery/yazi.png" alt="Yazi showing the generated Aurora UI Kit directory"></a></td>
+  </tr>
+</table>
+
+## Scripted scenes
 
 For a sequence with more than one frame:
 
@@ -57,7 +77,10 @@ A shot can crop by a cell rectangle or by the title of a bordered panel. Command
 
 See the validated v1 schema and key grammar in [`docs/scene-format.md`](docs/scene-format.md).
 
+
 ## What makes the output exact
+
+![Comparison showing gaps between font-rendered block glyphs and seamless ttyshot cell geometry](docs/assets/hero/geometry-comparison.png)
 
 - **One cell model.** Text, colors, SGR attributes, cursor state, and wide-cell continuations survive PTY, Ratatui, PNG, SVG, text, and JSON paths.
 - **Terminal geometry.** `U+2500–257F`, `U+2580–259F`, `U+2800–28FF`, legacy sextants/octants, Powerline separators, and common scrollbar glyphs are shapes aligned to cell edges.
@@ -139,7 +162,7 @@ jobs:
 
 Use fixture data in public images. Do not capture a developer's real home directory, account totals, paths, tokens, or model history.
 
-The implemented action inputs, trusted-ref model, and branch-safety contract are documented in [`docs/github-action.md`](docs/github-action.md). The launch design notes remain in [`docs/action-plan.md`](docs/action-plan.md).
+The implemented action inputs, trusted-ref model, and branch-safety contract are documented in [`docs/github-action.md`](docs/github-action.md).
 
 ## Coding-agent recipe
 
@@ -189,10 +212,6 @@ Checked against project documentation and source on 2026-10-15. “Different foc
 | [toque](https://github.com/joelgwebber/toque) | Headless Ratatui input, text frames, and SVG | Font-rendered block charts can show seams; ttyshot draws terminal graphics from cell geometry |
 | [ratasvg](https://github.com/sermuns/ratasvg) | Direct Ratatui-buffer-to-SVG conversion | ttyshot preserves cell backgrounds/attributes and also drives arbitrary PTY applications |
 | [Honeyshots](https://github.com/honeymux/honeyshots) | Component-level screenshots and named regions for OpenTUI/React | Targets OpenTUI rather than Ratatui or arbitrary terminal processes |
-
-## Gallery
-
-The launch gallery will use committed, synthetic fixtures for btop, lazygit, yazi, gitui, k9s, and Tokscale. The capture and review plan is in [`docs/gallery-plan.md`](docs/gallery-plan.md). No private usage data is used in repository images.
 
 ## License
 
