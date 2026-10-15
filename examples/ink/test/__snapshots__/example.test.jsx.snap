@@ -1,0 +1,14 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Ink renderToString > matches its ANSI and tuishot text snapshots > ansi 1`] = `
+"╭──────────────────────╮
+│ [1m[32mtuishot[39m[22m + Ink        │
+╰──────────────────────╯"
+`;
+
+exports[`Ink renderToString > matches its ANSI and tuishot text snapshots > tuishot text 1`] = `
+"╭──────────────────────╮
+│ tuishot + Ink        │
+╰──────────────────────╯
+                        "
+`;

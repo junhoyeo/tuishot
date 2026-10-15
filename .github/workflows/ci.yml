@@ -21,6 +21,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features --locked
+      - name: ANSI backend feature seam without default Alacritty
+        run: cargo check -p tuishot-ansi --no-default-features --locked
       - name: Render synthetic scene example
         run: cargo run --locked -p tuishot -- run crates/tuishot/examples/synthetic.toml
       - name: Ratatui feature matrix
@@ -81,3 +83,69 @@ jobs:
         run: npm run test:npm:integration
       - name: Inspect source package contents
         run: npm run pack:npm:dry-run
+
+  node-addon:
+    name: Node addon / build 22 / runtime 18
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.target
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> .target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13
+          cache: npm
+      - name: Install Node build tooling without native optional packages
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Check generated package matrix and lockfile
+        run: npm run check:packages
+      - name: Build the host Node-API addon
+        run: npm run build:node
+      - name: Test generated native addon packages
+        run: npm run test:node:release-generation
+      - name: Inspect @tuishot/node source package contents
+        run: npm run pack:node:dry-run
+      - name: Check Windows Node-API dependency graph compiles without PTY code
+        run: cargo check --locked -p tuishot-node --target x86_64-pc-windows-msvc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Run the real host addon test suite on Node 18
+        run: npm run test:node
+      - name: Test clean ESM and CommonJS packed consumers on Node 18
+        run: npm run test:node:integration
+
+  ink-node22:
+    name: Ink renderToString / Node 22
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.target
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> .target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/ink/package-lock.json
+      - name: Install Node build tooling without native optional packages
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Build the host Node-API addon
+        run: npm run build:node
+      - name: Install the isolated Ink example
+        run: npm --prefix examples/ink ci --ignore-scripts
+      - name: Run the Ink renderToString snapshots
+        run: npm --prefix examples/ink test

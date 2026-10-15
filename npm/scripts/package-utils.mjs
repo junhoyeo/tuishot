@@ -16,6 +16,17 @@ const expectedPackages = [
   "@tuishot/cli-win32-arm64-msvc",
 ];
 
+const expectedNodePackages = [
+  "@tuishot/node-darwin-arm64",
+  "@tuishot/node-darwin-x64",
+  "@tuishot/node-linux-x64-gnu",
+  "@tuishot/node-linux-x64-musl",
+  "@tuishot/node-linux-arm64-gnu",
+  "@tuishot/node-linux-arm64-musl",
+  "@tuishot/node-win32-x64-msvc",
+  "@tuishot/node-win32-arm64-msvc",
+];
+
 const expectedTargets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
@@ -55,10 +66,17 @@ export function readTargets() {
     throw new Error("npm/targets.json must use schemaVersion 1 and contain a targets array");
   }
   const packages = matrix.targets.map((target) => target.package);
+  const nodePackages = matrix.targets.map((target) => target.nodePackage);
   const rustTargets = matrix.targets.map((target) => target.target);
   if (JSON.stringify(packages) !== JSON.stringify(expectedPackages)) {
     throw new Error(
-      `npm/targets.json must contain exactly these native packages in order:\n${expectedPackages.join("\n")}`,
+      `npm/targets.json must contain exactly these CLI native packages in order:\n${expectedPackages.join("\n")}`,
+    );
+  }
+  if (JSON.stringify(nodePackages) !== JSON.stringify(expectedNodePackages)) {
+    throw new Error(
+      `npm/targets.json must contain exactly these Node native packages in order:
+${expectedNodePackages.join("\n")}`,
     );
   }
   if (JSON.stringify(rustTargets) !== JSON.stringify(expectedTargets)) {
@@ -113,6 +131,15 @@ export function readTargets() {
     if (target.package !== expectedPackage) {
       throw new Error(`${target.target} must map to ${expectedPackage}`);
     }
+    const expectedNodePackage = `@tuishot/node-${target.platform}-${target.arch}${
+      target.platform === "linux" ? `-${target.libc}` : target.platform === "win32" ? "-msvc" : ""
+    }`;
+    if (target.nodePackage !== expectedNodePackage) {
+      throw new Error(`${target.target} must map to ${expectedNodePackage}`);
+    }
+    if (target.addon !== "tuishot.node") {
+      throw new Error(`${target.target} must carry tuishot.node`);
+    }
     const expectedBinary = target.platform === "win32" ? "tuishot.exe" : "tuishot";
     if (target.binary !== expectedBinary) {
       throw new Error(`${target.target} must carry ${expectedBinary}`);
@@ -150,6 +177,35 @@ export function platformManifest(target, version) {
   if (target.npmLibc) {
     manifest.libc = [target.npmLibc];
   }
+  return manifest;
+}
+
+export function nodePlatformManifest(target, version) {
+  const manifest = {
+    name: target.nodePackage,
+    version,
+    description: `@tuishot/node native addon for ${target.platform} ${target.arch}${target.libc ? ` ${target.libc}` : ""}`,
+    license: "MIT",
+    engines: { node: ">=18" },
+    os: [target.platform],
+    cpu: [target.arch],
+    main: `./${target.addon}`,
+    exports: {
+      ".": `./${target.addon}`,
+      "./package.json": "./package.json",
+    },
+    files: [target.addon, "LICENSE-MIT"],
+    repository: {
+      type: "git",
+      url: "git+https://github.com/junhoyeo/tuishot.git",
+      directory: `npm/node-platforms/${target.target}`,
+    },
+    publishConfig: {
+      access: "public",
+      registry: "https://registry.npmjs.org/",
+    },
+  };
+  if (target.npmLibc) manifest.libc = [target.npmLibc];
   return manifest;
 }
 

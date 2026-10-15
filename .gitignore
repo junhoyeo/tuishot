@@ -8,3 +8,8 @@
 /npm/platforms/*/bin/
 /tuishot-*.tgz
 /npm/**/*.tgz
+
+# Local napi-rs build artifacts
+npm/node/*.node
+npm/node/bindings.generated.d.ts
+/examples/ink/node_modules/

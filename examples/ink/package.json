@@ -1,0 +1,19 @@
+{
+  "name": "tuishot-ink-example",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ink": "^8.0.0",
+    "react": "^19.3.1",
+    "chalk": "^6.0.1"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.5"
+  }
+}

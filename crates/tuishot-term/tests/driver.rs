@@ -339,6 +339,20 @@ fn exposed_sgr_flags_and_wide_output_convert_to_the_shared_grid() {
 }
 
 #[test]
+fn direct_ansi_and_native_pty_share_exact_grid_conversion() {
+    let output = "\x1b[1;38;5;196mA\x1b[0m界\x1b[2DZ";
+    let session = shell_session(
+        &format!("printf '{output}'; dd bs=1 count=1 of=/dev/null 2>/dev/null"),
+        Size::new(12, 3),
+        Duration::from_secs(2),
+    );
+    let native = session.wait_text("AZ", Duration::from_secs(1)).unwrap();
+    let direct = tuishot_ansi::ansi_to_grid(output, 12, 3).unwrap();
+
+    assert_eq!(native, direct);
+}
+
+#[test]
 fn hard_timeout_kills_the_complete_process_group_and_reports_screen() {
     let pid_file = unique_pid_file("timeout");
     let script = process_tree_script(&pid_file);
