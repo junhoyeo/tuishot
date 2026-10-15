@@ -9,7 +9,7 @@ Ratatui 0.29 is enabled by default:
 ```toml
 [dependencies]
 ratatui = "0.29"
-tuishot-ratatui = "0.1"
+tuishot-ratatui = "0.1.0"
 ```
 
 Select Ratatui 0.30 by disabling the default feature:
@@ -17,7 +17,7 @@ Select Ratatui 0.30 by disabling the default feature:
 ```toml
 [dependencies]
 ratatui = "0.30"
-tuishot-ratatui = { version = "0.1", default-features = false, features = ["ratatui-0-30"] }
+tuishot-ratatui = { version = "0.1.0", default-features = false, features = ["ratatui-0-30"] }
 ```
 
 The `ratatui-0-29` and `ratatui-0-30` features may be enabled together. The crate uses aliased dependencies, so `--all-features` accepts both buffer types in one build.

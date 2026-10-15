@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/tuishot-term"
+description = "Headless PTY driver and terminal emulation for deterministic TUI capture"
+readme = "README.md"
+keywords = ["terminal", "tui", "pty", "vt100", "snapshot"]
+categories = ["command-line-interface", "os"]
+include = ["src/**", "README.md", "LICENSE-MIT", "Cargo.toml"]
 
 [lints]
 workspace = true
@@ -13,4 +20,4 @@ workspace = true
 alacritty_terminal = { version = "0.26.0", default-features = false }
 nix = { version = "0.30.1", features = ["process", "signal"] }
 regex = { version = "1.12.2", default-features = false, features = ["perf", "std", "unicode-perl"] }
-tuishot-core = { path = "../tuishot-core" }
+tuishot-core = { version = "0.1.0", path = "../tuishot-core" }

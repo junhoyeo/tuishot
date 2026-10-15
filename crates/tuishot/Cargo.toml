@@ -5,8 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/tuishot"
 description = "Capture exact screenshots of terminal user interfaces"
 readme = "README.md"
+keywords = ["terminal", "tui", "screenshot", "testing", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+include = ["src/**", "examples/**", "README.md", "LICENSE-MIT", "Cargo.toml"]
 
 [lints]
 workspace = true
@@ -17,9 +22,9 @@ regex = { version = "1.12.2", default-features = false, features = ["perf", "std
 serde.workspace = true
 serde_json = "1.0.145"
 toml = "0.9.8"
-tuishot-core = { path = "../tuishot-core" }
-tuishot-render = { path = "../tuishot-render" }
-tuishot-term = { path = "../tuishot-term" }
+tuishot-core = { version = "0.1.0", path = "../tuishot-core" }
+tuishot-render = { version = "0.1.0", path = "../tuishot-render" }
+tuishot-term = { version = "0.1.0", path = "../tuishot-term" }
 
 [dev-dependencies]
 tempfile = "3.23.0"

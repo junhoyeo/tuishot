@@ -5,6 +5,13 @@ edition.workspace = true
 rust-version.workspace = true
 license = "MIT"
 repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/tuishot-core"
+description = "Shared terminal cell-grid model for deterministic TUI screenshots"
+readme = "README.md"
+keywords = ["terminal", "tui", "grid", "snapshot"]
+categories = ["data-structures"]
+include = ["src/**", "README.md", "LICENSE-MIT", "Cargo.toml"]
 
 [lints]
 workspace = true
