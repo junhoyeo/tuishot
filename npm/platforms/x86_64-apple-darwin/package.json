@@ -1,0 +1,34 @@
+{
+  "name": "@tuishot/cli-darwin-x64",
+  "version": "0.1.0",
+  "description": "tuishot native binary for darwin x64",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "./bin/tuishot",
+  "exports": {
+    ".": "./bin/tuishot",
+    "./bin": "./bin/tuishot",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/tuishot",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/platforms/x86_64-apple-darwin"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

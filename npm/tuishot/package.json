@@ -1,0 +1,44 @@
+{
+  "name": "tuishot",
+  "version": "0.1.0",
+  "description": "Alias for @tuishot/cli",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./index.cjs",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "tuishot": "./bin/tuishot.js"
+  },
+  "files": [
+    "bin/tuishot.js",
+    "index.js",
+    "index.cjs",
+    "index.d.ts",
+    "README.md",
+    "LICENSE-MIT"
+  ],
+  "dependencies": {
+    "@tuishot/cli": "0.1.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/tuishot"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

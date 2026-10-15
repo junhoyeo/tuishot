@@ -1,0 +1,60 @@
+{
+  "name": "@tuishot/cli",
+  "version": "0.1.0",
+  "description": "Capture exact screenshots of terminal user interfaces",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./bin": "./bin/tuishot.js",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "tuishot": "./bin/tuishot.js"
+  },
+  "files": [
+    "bin/tuishot.js",
+    "dist/esm",
+    "dist/cjs",
+    "dist/types",
+    "README.md",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/cli"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.esm.json && tsc -p tsconfig.cjs.json && tsc -p tsconfig.types.json && node scripts/finalize-build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepack": "npm run build"
+  },
+  "optionalDependencies": {
+    "@tuishot/cli-darwin-arm64": "0.1.0",
+    "@tuishot/cli-darwin-x64": "0.1.0",
+    "@tuishot/cli-linux-x64-gnu": "0.1.0",
+    "@tuishot/cli-linux-x64-musl": "0.1.0",
+    "@tuishot/cli-linux-arm64-gnu": "0.1.0",
+    "@tuishot/cli-linux-arm64-musl": "0.1.0",
+    "@tuishot/cli-win32-x64-msvc": "0.1.0",
+    "@tuishot/cli-win32-arm64-msvc": "0.1.0"
+  },
+  "devDependencies": {}
+}

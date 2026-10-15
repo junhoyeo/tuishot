@@ -1,0 +1,34 @@
+{
+  "name": "@tuishot/cli-win32-x64-msvc",
+  "version": "0.1.0",
+  "description": "tuishot native binary for win32 x64",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "./bin/tuishot.exe",
+  "exports": {
+    ".": "./bin/tuishot.exe",
+    "./bin": "./bin/tuishot.exe",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/tuishot.exe",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/platforms/x86_64-pc-windows-msvc"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
