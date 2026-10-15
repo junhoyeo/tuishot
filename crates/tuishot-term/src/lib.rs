@@ -23,21 +23,16 @@ use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::event_loop::{EventLoop, EventLoopSender, Msg};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::sync::FairMutex;
-use alacritty_terminal::term::cell::Flags;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 use alacritty_terminal::tty::{self, Shell};
-use alacritty_terminal::vte::ansi::{
-    Color as AlacrittyColor, CursorShape as AlacrittyCursorShape, NamedColor, Rgb as AlacrittyRgb,
-};
+use alacritty_terminal::vte::ansi::Rgb as AlacrittyRgb;
 use nix::errno::Errno;
 use nix::sys::signal::{Signal, kill, killpg};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::{Pid, getpgid};
 use regex::Regex;
-use tuishot_core::{
-    Attributes, Blink, CellWidth, Color, ColorRole, Cursor, CursorShape, Grid, Rgb, Style, Theme,
-    Underline,
-};
+use tuishot_ansi::term_to_grid;
+use tuishot_core::{Color, ColorRole, Grid, Theme};
 
 pub use tuishot_core as core;
 
@@ -1173,149 +1168,6 @@ fn invalid_function_key(number: u8) -> DriverError {
 
 fn cursor_key(app_cursor: bool, final_byte: u8) -> Vec<u8> {
     vec![0x1b, if app_cursor { b'O' } else { b'[' }, final_byte]
-}
-
-fn term_to_grid(term: &Term<DriverEventProxy>) -> Grid {
-    let content = term.renderable_content();
-    let cursor = content.cursor;
-    let display_offset = content.display_offset;
-    let mut grid = Grid::new(
-        u16::try_from(term.columns()).expect("terminal columns fit u16"),
-        u16::try_from(term.screen_lines()).expect("terminal rows fit u16"),
-    )
-    .expect("validated terminal dimensions produce a grid");
-
-    for indexed in content.display_iter {
-        let y = indexed.point.line.0 + i32::try_from(display_offset).unwrap_or(i32::MAX);
-        let Ok(y) = u16::try_from(y) else {
-            continue;
-        };
-        let Ok(x) = u16::try_from(indexed.point.column.0) else {
-            continue;
-        };
-        if indexed.flags.contains(Flags::WIDE_CHAR_SPACER) {
-            continue;
-        }
-
-        let mut symbol = indexed.c.to_string();
-        if let Some(zerowidth) = indexed.zerowidth() {
-            symbol.extend(zerowidth);
-        }
-        let width = if indexed.flags.contains(Flags::WIDE_CHAR) {
-            CellWidth::Wide
-        } else {
-            CellWidth::Single
-        };
-        let style = cell_style(&indexed);
-        if grid.put(x, y, symbol, width, style).is_err() {
-            let _ = grid.put(x, y, " ", CellWidth::Single, style);
-        }
-    }
-
-    let cursor_y = cursor.point.line.0 + i32::try_from(display_offset).unwrap_or(i32::MAX);
-    if let (Ok(x), Ok(y)) = (
-        u16::try_from(cursor.point.column.0),
-        u16::try_from(cursor_y),
-    ) && x < grid.columns()
-        && y < grid.rows()
-    {
-        let (shape, visible) = match cursor.shape {
-            AlacrittyCursorShape::Block | AlacrittyCursorShape::HollowBlock => {
-                (CursorShape::Block, true)
-            }
-            AlacrittyCursorShape::Underline => (CursorShape::Underline, true),
-            AlacrittyCursorShape::Beam => (CursorShape::Bar, true),
-            AlacrittyCursorShape::Hidden => (CursorShape::Block, false),
-        };
-        grid.cursor = Some(Cursor {
-            x,
-            y,
-            shape,
-            visible,
-        });
-    }
-    grid
-}
-
-fn cell_style(cell: &alacritty_terminal::term::cell::Cell) -> Style {
-    let flags = cell.flags;
-    let underline = if flags.contains(Flags::DOUBLE_UNDERLINE) {
-        Underline::Double
-    } else if flags.contains(Flags::UNDERCURL) {
-        Underline::Curly
-    } else if flags.contains(Flags::DOTTED_UNDERLINE) {
-        Underline::Dotted
-    } else if flags.contains(Flags::DASHED_UNDERLINE) {
-        Underline::Dashed
-    } else if flags.contains(Flags::UNDERLINE) {
-        Underline::Single
-    } else {
-        Underline::None
-    };
-    Style {
-        foreground: convert_color(cell.fg),
-        background: convert_color(cell.bg),
-        underline_color: cell.underline_color().map_or(Color::Default, convert_color),
-        attributes: Attributes {
-            bold: flags.contains(Flags::BOLD),
-            dim: flags.contains(Flags::DIM),
-            italic: flags.contains(Flags::ITALIC),
-            underline,
-            blink: Blink::None,
-            reverse: flags.contains(Flags::INVERSE),
-            hidden: flags.contains(Flags::HIDDEN),
-            strikethrough: flags.contains(Flags::STRIKEOUT),
-            ..Attributes::default()
-        },
-    }
-}
-
-fn convert_color(color: AlacrittyColor) -> Color {
-    match color {
-        AlacrittyColor::Spec(color) => Color::Rgb(Rgb::new(color.r, color.g, color.b)),
-        AlacrittyColor::Indexed(index) => Color::Indexed(index),
-        AlacrittyColor::Named(
-            named @ (NamedColor::Black
-            | NamedColor::Red
-            | NamedColor::Green
-            | NamedColor::Yellow
-            | NamedColor::Blue
-            | NamedColor::Magenta
-            | NamedColor::Cyan
-            | NamedColor::White
-            | NamedColor::BrightBlack
-            | NamedColor::BrightRed
-            | NamedColor::BrightGreen
-            | NamedColor::BrightYellow
-            | NamedColor::BrightBlue
-            | NamedColor::BrightMagenta
-            | NamedColor::BrightCyan
-            | NamedColor::BrightWhite),
-        ) => Color::Indexed(named_color_index(named)),
-        AlacrittyColor::Named(_) => Color::Default,
-    }
-}
-
-fn named_color_index(color: NamedColor) -> u8 {
-    match color {
-        NamedColor::Black => 0,
-        NamedColor::Red => 1,
-        NamedColor::Green => 2,
-        NamedColor::Yellow => 3,
-        NamedColor::Blue => 4,
-        NamedColor::Magenta => 5,
-        NamedColor::Cyan => 6,
-        NamedColor::White => 7,
-        NamedColor::BrightBlack => 8,
-        NamedColor::BrightRed => 9,
-        NamedColor::BrightGreen => 10,
-        NamedColor::BrightYellow => 11,
-        NamedColor::BrightBlue => 12,
-        NamedColor::BrightMagenta => 13,
-        NamedColor::BrightCyan => 14,
-        NamedColor::BrightWhite => 15,
-        _ => unreachable!("only ANSI named colors are converted to palette indices"),
-    }
 }
 
 /// Terminal driver failure.

@@ -1,0 +1,33 @@
+{
+  "name": "@tuishot/node-darwin-arm64",
+  "version": "0.1.0",
+  "description": "@tuishot/node native addon for darwin arm64",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "./tuishot.node",
+  "exports": {
+    ".": "./tuishot.node",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "tuishot.node",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/node-platforms/aarch64-apple-darwin"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

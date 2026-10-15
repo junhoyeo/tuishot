@@ -1,0 +1,25 @@
+[package]
+name = "tuishot-ansi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/tuishot-ansi"
+description = "Platform-neutral ANSI terminal emulation for tuishot cell grids"
+readme = "README.md"
+keywords = ["terminal", "ansi", "tui", "vt100", "snapshot"]
+categories = ["command-line-interface", "parser-implementations"]
+include = ["src/**", "README.md", "LICENSE-MIT", "Cargo.toml"]
+
+[lints]
+workspace = true
+
+[features]
+default = ["alacritty"]
+alacritty = ["dep:alacritty_terminal"]
+
+[dependencies]
+alacritty_terminal = { version = "0.26.0", default-features = false, optional = true }
+tuishot-core = { version = "0.1.0", path = "../tuishot-core" }

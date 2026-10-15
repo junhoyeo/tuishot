@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "npm/cli",
+    "npm/node",
     "npm/tuishot"
   ],
   "scripts": {
@@ -14,11 +15,18 @@
     "test:npm:integration": "npm run build:npm && node npm/scripts/integration.mjs",
     "test:npm:release-generation": "node npm/scripts/test-release-generation.mjs",
     "pack:npm:dry-run": "npm pack --dry-run --workspace @tuishot/cli && npm pack --dry-run --workspace tuishot",
-    "generate:platform": "node npm/scripts/generate-platform-package.mjs"
+    "generate:platform": "node npm/scripts/generate-platform-package.mjs",
+    "build:node": "npm run build:native --workspace @tuishot/node",
+    "test:node": "node --test npm/node/test/*.test.mjs",
+    "test:node:integration": "node npm/scripts/node-integration.mjs",
+    "test:node:release-generation": "node npm/scripts/test-node-release-generation.mjs",
+    "pack:node:dry-run": "npm pack --dry-run --workspace @tuishot/node",
+    "generate:node-platform": "node npm/scripts/generate-node-platform-package.mjs"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "@napi-rs/cli": "^3.10.8"
   },
   "engines": {
     "node": ">=18"
@@ -31,6 +39,14 @@
     "@tuishot/cli-linux-arm64-gnu": "file:npm/platforms/aarch64-unknown-linux-gnu",
     "@tuishot/cli-linux-arm64-musl": "file:npm/platforms/aarch64-unknown-linux-musl",
     "@tuishot/cli-win32-x64-msvc": "file:npm/platforms/x86_64-pc-windows-msvc",
-    "@tuishot/cli-win32-arm64-msvc": "file:npm/platforms/aarch64-pc-windows-msvc"
+    "@tuishot/cli-win32-arm64-msvc": "file:npm/platforms/aarch64-pc-windows-msvc",
+    "@tuishot/node-darwin-arm64": "file:npm/node-platforms/aarch64-apple-darwin",
+    "@tuishot/node-darwin-x64": "file:npm/node-platforms/x86_64-apple-darwin",
+    "@tuishot/node-linux-x64-gnu": "file:npm/node-platforms/x86_64-unknown-linux-gnu",
+    "@tuishot/node-linux-x64-musl": "file:npm/node-platforms/x86_64-unknown-linux-musl",
+    "@tuishot/node-linux-arm64-gnu": "file:npm/node-platforms/aarch64-unknown-linux-gnu",
+    "@tuishot/node-linux-arm64-musl": "file:npm/node-platforms/aarch64-unknown-linux-musl",
+    "@tuishot/node-win32-x64-msvc": "file:npm/node-platforms/x86_64-pc-windows-msvc",
+    "@tuishot/node-win32-arm64-msvc": "file:npm/node-platforms/aarch64-pc-windows-msvc"
   }
 }

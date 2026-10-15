@@ -1,0 +1,36 @@
+{
+  "name": "@tuishot/node-linux-arm64-gnu",
+  "version": "0.1.0",
+  "description": "@tuishot/node native addon for linux arm64 gnu",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "./tuishot.node",
+  "exports": {
+    ".": "./tuishot.node",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "tuishot.node",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/node-platforms/aarch64-unknown-linux-gnu"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "libc": [
+    "glibc"
+  ]
+}

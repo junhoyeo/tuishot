@@ -1,0 +1,36 @@
+{
+  "name": "@tuishot/node-linux-x64-musl",
+  "version": "0.1.0",
+  "description": "@tuishot/node native addon for linux x64 musl",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "./tuishot.node",
+  "exports": {
+    ".": "./tuishot.node",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "tuishot.node",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/node-platforms/x86_64-unknown-linux-musl"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "libc": [
+    "musl"
+  ]
+}

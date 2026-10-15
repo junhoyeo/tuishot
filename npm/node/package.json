@@ -1,0 +1,65 @@
+{
+  "name": "@tuishot/node",
+  "version": "0.1.0",
+  "description": "Render ANSI strings and tuishot grids in-process with native Node-API bindings",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "main": "./index.cjs",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.cjs",
+    "index.d.ts",
+    "README.md",
+    "LICENSE-MIT"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/node"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build:native": "napi build --platform --release --manifest-path ../../crates/tuishot-node/Cargo.toml --output-dir . --js index.cjs --dts bindings.generated.d.ts",
+    "prepack": "node ../../npm/scripts/check-node-package.mjs"
+  },
+  "napi": {
+    "binaryName": "tuishot",
+    "packageName": "@tuishot/node",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl",
+      "aarch64-unknown-linux-gnu",
+      "aarch64-unknown-linux-musl",
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
+    ]
+  },
+  "optionalDependencies": {
+    "@tuishot/node-darwin-arm64": "0.1.0",
+    "@tuishot/node-darwin-x64": "0.1.0",
+    "@tuishot/node-linux-x64-gnu": "0.1.0",
+    "@tuishot/node-linux-x64-musl": "0.1.0",
+    "@tuishot/node-linux-arm64-gnu": "0.1.0",
+    "@tuishot/node-linux-arm64-musl": "0.1.0",
+    "@tuishot/node-win32-x64-msvc": "0.1.0",
+    "@tuishot/node-win32-arm64-msvc": "0.1.0"
+  }
+}

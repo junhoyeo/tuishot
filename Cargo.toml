@@ -1,7 +1,9 @@
 [workspace]
 members = [
     "crates/tuishot",
+    "crates/tuishot-ansi",
     "crates/tuishot-core",
+    "crates/tuishot-node",
     "crates/tuishot-ratatui",
     "crates/tuishot-render",
     "crates/tuishot-term",
