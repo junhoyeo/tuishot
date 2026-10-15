@@ -1,6 +1,6 @@
-![ttyshot collage showing Tokscale, LazyGit, Ratatui, and Yazi](docs/assets/hero/ttyshot-hero.png)
+![tuishot collage showing Tokscale, LazyGit, Ratatui, and Yazi](docs/assets/hero/tuishot-hero.png)
 
-# ttyshot
+# tuishot
 
 **Screenshots of any TUI that look like a real terminal — and stay up to date.**
 
@@ -11,23 +11,23 @@
 ## 30-second quick start
 
 ```sh
-cargo install --git https://github.com/junhoyeo/ttyshot --locked
-ttyshot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
+cargo install --git https://github.com/junhoyeo/tuishot --locked
+tuishot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
 ```
 
 The command runs at exactly `120x40`, waits for `Ready`, writes `dashboard.png`, and terminates the complete child process group. A timeout names the failed condition and prints the last screen.
 
 ## Gallery
 
-Open any image for the full-resolution ttyshot capture.
+Open any image for the full-resolution tuishot capture.
 
 <table>
   <tr>
-    <td width="50%"><strong>Tokscale</strong><br><sub>75-day generated usage dataset</sub><br><a href="docs/assets/gallery/tokscale.png"><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered from a generated usage dataset by ttyshot"></a></td>
+    <td width="50%"><strong>Tokscale</strong><br><sub>75-day generated usage dataset</sub><br><a href="docs/assets/gallery/tokscale.png"><img src="docs/assets/gallery/tokscale.png" alt="Tokscale overview rendered from a generated usage dataset by tuishot"></a></td>
     <td width="50%"><strong>LazyGit</strong><br><sub>Orbit Notes working tree</sub><br><a href="docs/assets/gallery/lazygit.png"><img src="docs/assets/gallery/lazygit.png" alt="LazyGit showing the generated Orbit Notes project"></a></td>
   </tr>
   <tr>
-    <td width="50%"><strong>Ratatui demo2</strong><br><sub>official showcase application</sub><br><a href="docs/assets/gallery/ratatui.png"><img src="docs/assets/gallery/ratatui.png" alt="Official Ratatui demo2 rendered by ttyshot"></a></td>
+    <td width="50%"><strong>Ratatui demo2</strong><br><sub>official showcase application</sub><br><a href="docs/assets/gallery/ratatui.png"><img src="docs/assets/gallery/ratatui.png" alt="Official Ratatui demo2 rendered by tuishot"></a></td>
     <td width="50%"><strong>Helix</strong><br><sub>Rust code in Catppuccin Mocha</sub><br><a href="docs/assets/gallery/helix.png"><img src="docs/assets/gallery/helix.png" alt="Helix showing generated syntax-highlighted Rust code"></a></td>
   </tr>
   <tr>
@@ -40,7 +40,7 @@ Open any image for the full-resolution ttyshot capture.
 For a sequence with more than one frame:
 
 ```sh
-ttyshot run ttyshot.toml
+tuishot run tuishot.toml
 ```
 
 ```toml
@@ -80,11 +80,11 @@ See the validated v1 schema and key grammar in [`docs/scene-format.md`](docs/sce
 
 ## What makes the output exact
 
-![Comparison showing gaps between font-rendered block glyphs and seamless ttyshot cell geometry](docs/assets/hero/geometry-comparison.png)
+![Comparison showing gaps between font-rendered block glyphs and seamless tuishot cell geometry](docs/assets/hero/geometry-comparison.png)
 
 - **One cell model.** Text, colors, SGR attributes, cursor state, and wide-cell continuations survive PTY, Ratatui, PNG, SVG, text, and JSON paths.
 - **Terminal geometry.** `U+2500–257F`, `U+2580–259F`, `U+2800–28FF`, legacy sextants/octants, Powerline separators, and common scrollbar glyphs are shapes aligned to cell edges.
-- **Pinned typography.** ttyshot bundles JetBrains Mono under the SIL Open Font License 1.1. PNG uses the bundled bytes; SVG emits reusable paths from the same selected glyphs instead of embedding a full font.
+- **Pinned typography.** tuishot bundles JetBrains Mono under the SIL Open Font License 1.1. PNG uses the bundled bytes; SVG emits reusable paths from the same selected glyphs instead of embedding a full font.
 - **Hermetic sessions.** `--env-clear`, repeatable `--env K=V`, `--cwd`, `--home`, an exact PTY size, and hard process-group timeouts remove common CI differences.
 - **No fixed sleeps.** Use `wait_text`, `wait_regex`, `wait_absent`, or `wait_stable` with explicit timeouts.
 
@@ -93,7 +93,7 @@ PNG encoding is deterministic. The test suite renders the same golden twice, che
 ## One-shot capture
 
 ```sh
-ttyshot \
+tuishot \
   -o screenshots/status.png \
   --size 100x30 \
   --wait-regex 'Connected|Ready' \
@@ -113,15 +113,15 @@ Tokscale and other Ratatui applications can convert a `Buffer` directly:
 
 ```toml
 [dev-dependencies]
-ttyshot-ratatui = { git = "https://github.com/junhoyeo/ttyshot", features = ["ratatui-0-29"] }
+tuishot-ratatui = { git = "https://github.com/junhoyeo/tuishot", features = ["ratatui-0-29"] }
 ```
 
 ```rust
-use ttyshot_ratatui::{
+use tuishot_ratatui::{
     snapshot_json, snapshot_png, snapshot_svg, snapshot_text, BufferExt,
 };
 
-let grid = buffer.to_ttyshot_grid()?;
+let grid = buffer.to_tuishot_grid()?;
 insta::assert_snapshot!(snapshot_text(&buffer)?);
 insta::assert_snapshot!(snapshot_json(&buffer)?);
 insta::assert_binary_snapshot!("dashboard.png", snapshot_png(&buffer)?);
@@ -153,11 +153,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: junhoyeo/ttyshot@v0
+      - uses: junhoyeo/tuishot@v0
         with:
-          scenes: ttyshot.toml
+          scenes: tuishot.toml
           paths: screenshots
-          branch: ttyshot/update-screenshots
+          branch: tuishot/update-screenshots
 ```
 
 Use fixture data in public images. Do not capture a developer's real home directory, account totals, paths, tokens, or model history.
@@ -169,22 +169,22 @@ The implemented action inputs, trusted-ref model, and branch-safety contract are
 Give an agent both pixels and state:
 
 ```sh
-ttyshot \
+tuishot \
   -o /tmp/settings.png --format png,json,txt \
   --size 100x30 --wait-text "Settings" \
   -- my-tui
 ```
 
-The agent can inspect the PNG, assert text without OCR, and read exact cell colors from JSON. If the screen never appears, ttyshot exits non-zero with the failed wait and last screen instead of hanging.
+The agent can inspect the PNG, assert text without OCR, and read exact cell colors from JSON. If the screen never appears, tuishot exits non-zero with the failed wait and last screen instead of hanging.
 
 ## CJK, deterministic fonts, and emoji
 
-By default, ttyshot uses an ordered system CJK fallback: Apple SD Gothic Neo / PingFang / Hiragino on macOS and Noto Sans CJK on Linux when installed. CJK graphemes still occupy the explicit one- or two-cell footprint supplied by the terminal grid.
+By default, tuishot uses an ordered system CJK fallback: Apple SD Gothic Neo / PingFang / Hiragino on macOS and Noto Sans CJK on Linux when installed. CJK graphemes still occupy the explicit one- or two-cell footprint supplied by the terminal grid.
 
 For byte-stable CI, disable system discovery and pin every font file:
 
 ```sh
-ttyshot --deterministic-fonts \
+tuishot --deterministic-fonts \
   --font ./fixtures/JetBrainsMono-Regular.ttf \
   --fallback-font ./fixtures/NotoSansMonoCJK-Regular.otf \
   -o screenshot.png -- my-tui
@@ -202,15 +202,15 @@ The shared grid and renderer represent blink, frame/encircle, overline, and ideo
 
 Checked against project documentation and source on 2026-10-15. “Different focus” is not a defect; these tools solve related but distinct jobs.
 
-| Project | Best at | Difference from ttyshot |
+| Project | Best at | Difference from tuishot |
 | --- | --- | --- |
 | [VHS](https://github.com/charmbracelet/vhs) | Mature scripted terminal recordings, `Wait`, and PNG screenshots | Uses ttyd, ffmpeg, and a browser/xterm.js pipeline; screenshots are PNG rather than PNG + SVG + cell JSON |
 | [freeze](https://github.com/charmbracelet/freeze) | Polished images of code and static terminal output | Does not drive a multi-step interactive TUI session |
 | [termshot](https://github.com/homeport/termshot) | Simple screenshots of command output | Focuses on command output rather than deterministic scripted TUI states |
 | [termframe](https://github.com/pamburus/termframe) | Running one command and exporting SVG, with optional font embedding | Non-interactive single-command flow rather than step scripts and in-process Ratatui buffers |
-| [termscope](https://github.com/mwunsch/termscope) | Headless VT snapshots, text/idle waits, and agent workflows using libghostty-vt | ttyshot also targets deterministic PNG, shared cell JSON, and a versioned Ratatui adapter |
-| [toque](https://github.com/joelgwebber/toque) | Headless Ratatui input, text frames, and SVG | Font-rendered block charts can show seams; ttyshot draws terminal graphics from cell geometry |
-| [ratasvg](https://github.com/sermuns/ratasvg) | Direct Ratatui-buffer-to-SVG conversion | ttyshot preserves cell backgrounds/attributes and also drives arbitrary PTY applications |
+| [termscope](https://github.com/mwunsch/termscope) | Headless VT snapshots, text/idle waits, and agent workflows using libghostty-vt | tuishot also targets deterministic PNG, shared cell JSON, and a versioned Ratatui adapter |
+| [toque](https://github.com/joelgwebber/toque) | Headless Ratatui input, text frames, and SVG | Font-rendered block charts can show seams; tuishot draws terminal graphics from cell geometry |
+| [ratasvg](https://github.com/sermuns/ratasvg) | Direct Ratatui-buffer-to-SVG conversion | tuishot preserves cell backgrounds/attributes and also drives arbitrary PTY applications |
 | [Honeyshots](https://github.com/honeymux/honeyshots) | Component-level screenshots and named regions for OpenTUI/React | Targets OpenTUI rather than Ratatui or arbitrary terminal processes |
 
 ## License

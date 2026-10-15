@@ -4,14 +4,14 @@ The gallery uses generated or application-provided demo content. No account, hos
 
 ## Hero collage
 
-`hero/ttyshot-hero.png` combines four real ttyshot captures: Tokscale, LazyGit, the official Ratatui demo2 application, and Yazi. The one-line product promise is part of the composition so it remains legible at README display width.
+`hero/tuishot-hero.png` combines four real tuishot captures: Tokscale, LazyGit, the official Ratatui demo2 application, and Yazi. The one-line product promise is part of the composition so it remains legible at README display width.
 
 ## Geometry comparison
 
 `hero/geometry-comparison.png` uses columns 27–38 and rows 5–10 from a tracked 120×40 Tokscale styled grid. Both panels use the same 12×6 cell symbols and RGB colors:
 
 - **FONT-GLYPH EXPORT** draws each block character with Menlo collection index 0 at 15 px, offset one pixel inside a 10×20 cell. It is a representative font-based export path.
-- **TTYSHOT GEOMETRY** uses the corresponding cells from the checked-in ttyshot PNG.
+- **TUISHOT GEOMETRY** uses the corresponding cells from the checked-in tuishot PNG.
 
 Both sides are enlarged 6× with nearest-neighbour sampling. The headline is scoped to this Menlo fixture. It does not claim that the preview is a terminal, that every font gaps, or that the two renderers are pixel-equivalent. The committed image used Menlo from macOS 26.2 (`/System/Library/Fonts/Menlo.ttc`, SHA-256 `dc256e0b39c2a6fec947129d421fef41b8b429f58f9b6e5d1b148c87f775c1f6`).
 
@@ -30,7 +30,7 @@ uv run --python 3.14.0 --with-requirements scripts/requirements-readme-assets.tx
   --yazi docs/assets/gallery/yazi.png \
   --grid-json docs/assets/source/tokscale-4.19-grid.json.gz \
   --glyph-font /System/Library/Fonts/Menlo.ttc \
-  --hero-output docs/assets/hero/ttyshot-hero.png \
+  --hero-output docs/assets/hero/tuishot-hero.png \
   --comparison-output docs/assets/hero/geometry-comparison.png
 ```
 
@@ -46,7 +46,7 @@ The script uses the repository's bundled JetBrains Mono file for composition lab
 | `gallery/helix.png` | Helix | 25.07.1; generated Rust dashboard module, Catppuccin Mocha | isolated HOME/config and working directory |
 | `gallery/yazi.png` | Yazi | 26.9.1; generated Aurora UI Kit directory | isolated HOME/config, icons disabled, path header cropped by cells |
 
-Captures use a real PTY, ttyshot scale 2, window chrome, a shadow, state-based waits, and no fixed sleeps. Each committed image was inspected at approximately 900 px README width, as a full frame, and as near-1:1 quadrants. README thumbnails link to the full-resolution files.
+Captures use a real PTY, tuishot scale 2, window chrome, a shadow, state-based waits, and no fixed sleeps. Each committed image was inspected at approximately 900 px README width, as a full frame, and as near-1:1 quadrants. README thumbnails link to the full-resolution files.
 
 ## SHA-256
 
@@ -55,6 +55,6 @@ Captures use a real PTY, ttyshot scale 2, window chrome, a shadow, state-based w
 - `8ae086335dfdf8d53235af5a5e22dac45ac8863f9e1c2cce616a0d21cf0d87dc`  `docs/assets/gallery/ratatui.png`
 - `615b7c2a566836d083cbb075bd5609b304709cd9dd6f5e7c7ee33db2d4d390db`  `docs/assets/gallery/tokscale.png`
 - `69ce0710476fea66a605a824cd8c388fff78d067acd023cbf2305c3d464e2aa9`  `docs/assets/gallery/yazi.png`
-- `7f5fcae96b4dcf60a709cc82db56db29179bcb4740d7320fc68228ccc9ad7db7`  `docs/assets/hero/geometry-comparison.png`
-- `65c0dfe04a94085ab636c971e0a77c21fdfd14058de6536d17ebe0bb9c714c3d`  `docs/assets/hero/ttyshot-hero.png`
+- `24b9529ee08aae4b220bd4ab7855c1c76338217f64efb57de554e03ab5563e78`  `docs/assets/hero/geometry-comparison.png`
+- `505ffd7e4a34194afc71fd4efcc248e5cf7367cfb7d904484b7fe47e22586f31`  `docs/assets/hero/tuishot-hero.png`
 - `af51b7be1dd8f95e5968fa0369d16d64c098fcc8d98d26642b5f562ec7097b45`  `docs/assets/source/tokscale-4.19-grid.json.gz`

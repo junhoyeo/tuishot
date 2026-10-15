@@ -1,0 +1,28 @@
+version = 1
+
+[defaults]
+size = "32x6"
+timeout = "5s"
+formats = ["png", "svg", "txt", "json"]
+output_dir = "../../../target/tuishot-example"
+deterministic_fonts = true
+
+[[scene]]
+name = "synthetic-panel"
+command = ["/bin/sh", "-c", """printf '+ Overview --------------------+
+| synthetic fixture: ready     |
+| blocks: ▁▃▅▇█  braille: ⠛⣿   |
++------------------------------+
+'; IFS= read -r hold"""]
+env_clear = true
+env = { LANG = "en_US.UTF-8", TZ = "UTC" }
+
+[[scene.step]]
+wait_text = "synthetic fixture: ready"
+
+[[scene.step]]
+wait_stable = "100ms"
+
+[[scene.step]]
+shot = "overview"
+panel = "Overview"

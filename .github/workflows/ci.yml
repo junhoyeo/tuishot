@@ -22,12 +22,12 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features --locked
       - name: Render synthetic scene example
-        run: cargo run --locked -p ttyshot -- run crates/ttyshot/examples/synthetic.toml
+        run: cargo run --locked -p tuishot -- run crates/tuishot/examples/synthetic.toml
       - name: Ratatui feature matrix
         run: |
-          cargo test -p ttyshot-ratatui --locked
-          cargo test -p ttyshot-ratatui --no-default-features --features ratatui-0-30 --locked
-          cargo check -p ttyshot-ratatui --no-default-features --locked
+          cargo test -p tuishot-ratatui --locked
+          cargo test -p tuishot-ratatui --no-default-features --features ratatui-0-30 --locked
+          cargo check -p tuishot-ratatui --no-default-features --locked
 
   deny:
     name: Linux / cargo-deny

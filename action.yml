@@ -1,5 +1,5 @@
-name: ttyshot screenshot update
-description: Run committed ttyshot scenes and open a pull request for changed screenshots.
+name: tuishot screenshot update
+description: Run committed tuishot scenes and open a pull request for changed screenshots.
 author: Junho Yeo
 
 inputs:
@@ -7,12 +7,12 @@ inputs:
     description: Scene file path relative to the consumer repository.
     required: true
   paths:
-    description: Newline-separated repository paths that ttyshot may change.
+    description: Newline-separated repository paths that tuishot may change.
     required: true
   branch:
     description: Dedicated automation-owned update branch.
     required: false
-    default: ttyshot/update-screenshots
+    default: tuishot/update-screenshots
   title:
     description: Commit and pull request title.
     required: false
@@ -48,11 +48,11 @@ runs:
         case "${GITHUB_EVENT_NAME:?}" in
           push|schedule|workflow_dispatch) ;;
           pull_request|pull_request_target)
-            printf 'ttyshot action: event %s is not trusted; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
+            printf 'tuishot action: event %s is not trusted; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
             exit 1
             ;;
           *)
-            printf 'ttyshot action: unsupported event %s; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
+            printf 'tuishot action: unsupported event %s; use push, schedule, or workflow_dispatch\n' "$GITHUB_EVENT_NAME" >&2
             exit 1
             ;;
         esac
@@ -63,36 +63,36 @@ runs:
       run: |
         set -euo pipefail
         if [[ "${RUNNER_OS:-}" != "Linux" ]]; then
-          printf 'ttyshot action: only Linux runners are supported before the public launch\n' >&2
+          printf 'tuishot action: only Linux runners are supported before the public launch\n' >&2
           exit 1
         fi
         cd -- "$GITHUB_ACTION_PATH"
-        build_root="$(mktemp -d "$RUNNER_TEMP/ttyshot-action.XXXXXX")"
-        cargo_home="$(mktemp -d "$RUNNER_TEMP/ttyshot-cargo-home.XXXXXX")"
+        build_root="$(mktemp -d "$RUNNER_TEMP/tuishot-action.XXXXXX")"
+        cargo_home="$(mktemp -d "$RUNNER_TEMP/tuishot-cargo-home.XXXXXX")"
         unset RUSTC_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS CARGO_BUILD_RUSTC_WRAPPER
         export CARGO_HOME="$cargo_home"
         target_triple="$(rustc -vV | sed -n 's/^host: //p')"
-        [[ -n "$target_triple" ]] || { printf 'ttyshot action: could not determine the Rust host target\n' >&2; exit 1; }
+        [[ -n "$target_triple" ]] || { printf 'tuishot action: could not determine the Rust host target\n' >&2; exit 1; }
         cargo build \
           --locked \
           --manifest-path "$GITHUB_ACTION_PATH/Cargo.toml" \
-          --package ttyshot \
+          --package tuishot \
           --target "$target_triple" \
           --target-dir "$build_root/target"
-        printf 'ttyshot-bin=%s\n' "$build_root/target/$target_triple/debug/ttyshot" >> "$GITHUB_OUTPUT"
+        printf 'tuishot-bin=%s\n' "$build_root/target/$target_triple/debug/tuishot" >> "$GITHUB_OUTPUT"
 
     - name: Run scenes and update pull request
       id: update
       shell: bash
       env:
-        TTYSHOT_BIN: ${{ steps.build.outputs.ttyshot-bin }}
-        TTYSHOT_SCENES: ${{ inputs.scenes }}
-        TTYSHOT_ALLOWED_PATHS: ${{ inputs.paths }}
-        TTYSHOT_UPDATE_BRANCH: ${{ inputs.branch }}
-        TTYSHOT_UPDATE_TITLE: ${{ inputs.title }}
-        TTYSHOT_PR_BODY: ${{ inputs.body }}
-        TTYSHOT_BASE_BRANCH: ${{ inputs.base }}
-        TTYSHOT_DEFAULT_BASE: ${{ github.event.repository.default_branch }}
+        TUISHOT_BIN: ${{ steps.build.outputs.tuishot-bin }}
+        TUISHOT_SCENES: ${{ inputs.scenes }}
+        TUISHOT_ALLOWED_PATHS: ${{ inputs.paths }}
+        TUISHOT_UPDATE_BRANCH: ${{ inputs.branch }}
+        TUISHOT_UPDATE_TITLE: ${{ inputs.title }}
+        TUISHOT_PR_BODY: ${{ inputs.body }}
+        TUISHOT_BASE_BRANCH: ${{ inputs.base }}
+        TUISHOT_DEFAULT_BASE: ${{ github.event.repository.default_branch }}
         GH_TOKEN: ${{ inputs.token }}
       run: bash "$GITHUB_ACTION_PATH/scripts/github-action.sh"
 

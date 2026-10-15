@@ -22,7 +22,7 @@ fallback_fonts = ["fixtures/NotoSansMonoCJK-Regular.otf"]
 name = "overview"
 command = ["my-tui", "--fixture", "fixtures/demo.json"]
 cwd = "."
-home = ".ttyshot/home"
+home = ".tuishot/home"
 env = { TERM = "xterm-256color", LANG = "en_US.UTF-8", TZ = "UTC" }
 
 [[scene.step]]
