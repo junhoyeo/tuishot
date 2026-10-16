@@ -1690,6 +1690,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2111,7 +2122,10 @@ name = "tuishot-ansi"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "serde_json",
  "tuishot-core",
+ "unicode-width 0.2.0",
+ "vte",
 ]
 
 [[package]]
@@ -2168,6 +2182,20 @@ dependencies = [
  "regex",
  "tuishot-ansi",
  "tuishot-core",
+]
+
+[[package]]
+name = "tuishot-wasm"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2",
+ "tuishot-ansi",
+ "tuishot-core",
+ "tuishot-render",
+ "wasm-bindgen",
 ]
 
 [[package]]

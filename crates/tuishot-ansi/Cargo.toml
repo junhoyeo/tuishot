@@ -19,7 +19,13 @@ workspace = true
 [features]
 default = ["alacritty"]
 alacritty = ["dep:alacritty_terminal"]
+vte = ["dep:vte", "dep:unicode-width"]
 
 [dependencies]
 alacritty_terminal = { version = "0.26.0", default-features = false, optional = true }
 tuishot-core = { version = "0.1.0", path = "../tuishot-core" }
+unicode-width = { version = "0.2.0", optional = true }
+vte = { version = "0.15.0", default-features = false, optional = true }
+
+[dev-dependencies]
+serde_json = "1.0.145"
