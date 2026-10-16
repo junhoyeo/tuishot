@@ -262,11 +262,42 @@ jobs:
           path: npm/wasm/dist/
           if-no-files-found: error
 
+  verify-cli-artifacts:
+    name: Verify transported CLI packages
+    needs: [plan, build-cli]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-platform-*
+          path: incoming
+      - name: Restore executable permissions after artifact transfer
+        run: node .github/scripts/restore-cli-artifacts.mjs incoming
+      - name: Install JavaScript build tools
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Build the CLI wrapper
+        run: npm run build:npm
+      - name: Test artifact modes and npm tarball permissions
+        run: node --test .github/scripts/restore-cli-artifacts.test.mjs
+      - name: Install the actual transported package and exercise the CLI and API
+        run: node npm/scripts/integration.mjs --platform-package npm/platforms/x86_64-unknown-linux-gnu
+
+  release-ready:
+    name: Validate complete release
+    needs: [plan, build-cli, build-node, build-wasm, verify-cli-artifacts]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "All platform builds, addon consumers and transported CLI packages passed."
+
   # Attaches every archive and checksum to the GitHub Release. This is the only
   # job allowed to write to the repository, and only for a v* tag.
   github-release:
     name: GitHub Release
-    needs: [plan, build-cli, build-node, build-wasm]
+    needs: [plan, release-ready]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -312,7 +343,7 @@ jobs:
 
   # Platform packages must exist on the registry before the parent package that
   # declares them as optional dependencies, so the groups run in a chain:
-  # CLI platforms -> @tuishot/cli -> tuishot, then Node platforms ->
+  # CLI platforms -> @tuishot/cli, then Node platforms ->
   # @tuishot/node, then @tuishot/wasm.
   #
   # Every `npm publish` runs in THIS file on purpose. npm trusted publishing
@@ -334,7 +365,7 @@ jobs:
   # release-manifest:cli-platform-packages:end
   publish-cli-platforms:
     name: npm publish CLI platforms
-    needs: [plan, build-cli]
+    needs: [plan, release-ready]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -388,32 +419,8 @@ jobs:
           path: incoming
       # Each build job uploads one artifact per target, so the artifact name
       # prefix has to be stripped back to the plain Rust target directory.
-      - name: Restore the generated platform directory layout
-        env:
-          ROOT: npm/platforms
-          PREFIX: cli-platform-
-        run: |
-          set -euo pipefail
-          mkdir -p "$ROOT"
-          found=0
-          for directory in incoming/"$PREFIX"*; do
-            [[ -d "$directory" ]] || continue
-            target="$(basename "$directory")"
-            target="${target#"$PREFIX"}"
-            if [[ -z "$target" ]]; then
-              printf 'artifact %s has no target suffix\n' "$directory" >&2
-              exit 1
-            fi
-            rm -rf "${ROOT:?}/${target:?}"
-            mv "$directory" "$ROOT/$target"
-            found=$((found + 1))
-          done
-          if [[ "$found" -eq 0 ]]; then
-            printf 'no %s* artifacts were downloaded\n' "$PREFIX" >&2
-            exit 1
-          fi
-          printf 'Restored %d platform packages into %s\n' "$found" "$ROOT"
-          ls -l "$ROOT"
+      - name: Restore executable platform packages after artifact transfer
+        run: node .github/scripts/restore-cli-artifacts.mjs incoming
       - name: Install dependencies
         run: npm ci --omit=optional --ignore-scripts
       - name: Check the release manifest against the target matrix
@@ -424,7 +431,7 @@ jobs:
         run: node .github/scripts/publish-packages.mjs --kind cli-platforms --version "$VERSION"
 
   publish-cli:
-    name: npm publish @tuishot/cli and tuishot
+    name: npm publish @tuishot/cli
     needs: [plan, publish-cli-platforms]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
@@ -496,7 +503,7 @@ jobs:
   # release-manifest:node-platform-packages:end
   publish-node-platforms:
     name: npm publish Node addon platforms
-    needs: [plan, build-node]
+    needs: [plan, release-ready]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -649,7 +656,7 @@ jobs:
   # is skipped instead of failing the release.
   publish-wasm:
     name: npm publish @tuishot/wasm
-    needs: [plan, build-wasm]
+    needs: [plan, build-wasm, release-ready]
     if: needs.plan.outputs.publish == 'true' && needs.build-wasm.outputs.built == 'true'
     runs-on: ubuntu-24.04
     permissions:
@@ -715,7 +722,7 @@ jobs:
   # artifacts.
   publish-crates:
     name: crates.io publish
-    needs: [plan, build-cli]
+    needs: [plan, release-ready]
     if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
