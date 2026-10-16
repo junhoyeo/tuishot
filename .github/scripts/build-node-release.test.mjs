@@ -38,3 +38,26 @@ test("invalid target arguments are rejected before any build process", () => {
   assert.throws(() => main([]), /Usage/);
   assert.throws(() => main(["--target", "../../unsafe"]), /Unsupported/);
 });
+
+
+test("Windows npm commands use the JS entry point and preserve literal arguments", async () => {
+  const { npmInvocation } = await import("../../npm/scripts/npm-command.mjs");
+  const executable = String.raw`C:\Program Files\nodejs\node.exe`;
+  const cli = String.raw`C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js`;
+  const args = ["install", String.raw`C:\Temp\package with spaces & brackets.tgz`];
+  assert.deepEqual(npmInvocation(args, {
+    platform: "win32", executable, env: {}, exists: (file) => file === cli,
+  }), { command: executable, args: [cli, ...args] });
+});
+
+test("Windows npm respects npm_execpath and rejects shell wrappers or missing npm", async () => {
+  const { npmInvocation } = await import("../../npm/scripts/npm-command.mjs");
+  const cli = String.raw`D:\custom\npm\bin\npm-cli.js`;
+  assert.deepEqual(npmInvocation(["pack"], {
+    platform: "win32", executable: String.raw`D:\node.exe`, env: { npm_execpath: cli }, exists: () => true,
+  }), { command: String.raw`D:\node.exe`, args: [cli, "pack"] });
+  assert.throws(() => npmInvocation(["pack"], {
+    platform: "win32", executable: String.raw`D:\node.exe`, env: { npm_execpath: String.raw`D:\npm.cmd` }, exists: () => false,
+  }), /Cannot find npm-cli/);
+  assert.deepEqual(npmInvocation(["pack"], {platform: "linux"}), {command: "npm", args: ["pack"]});
+});

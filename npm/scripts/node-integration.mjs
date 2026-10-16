@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { npmInvocation } from "./npm-command.mjs";
 import {
   cpSync,
   existsSync,
@@ -15,6 +16,7 @@ import { join, resolve } from "node:path";
 import { readCargoVersion, readJson, readTargets, repositoryRoot } from "./package-utils.mjs";
 
 function run(command, args, options = {}) {
+  if (command === "npm") ({ command, args } = npmInvocation(args, { env: options.env ?? process.env }));
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? repositoryRoot,
     encoding: "utf8",
