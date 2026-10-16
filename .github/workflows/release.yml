@@ -79,7 +79,7 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
           - target: x86_64-apple-darwin
-            runner: macos-15
+            runner: macos-15-intel
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
           - target: x86_64-unknown-linux-musl
@@ -171,7 +171,7 @@ jobs:
           - target: aarch64-apple-darwin
             runner: macos-15
           - target: x86_64-apple-darwin
-            runner: macos-15
+            runner: macos-15-intel
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
           - target: x86_64-unknown-linux-musl
@@ -188,52 +188,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !endsWith(matrix.target, '-musl') }}
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        if: ${{ !endsWith(matrix.target, '-musl') }}
         with:
           key: release-node-${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22.14
-      - name: Install the musl toolchain
+      - name: Check the portable release builder
+        run: node --test .github/scripts/build-node-release.test.mjs
+      - name: Build, package and load the native Node-API addon
+        if: ${{ !endsWith(matrix.target, '-musl') }}
+        run: node .github/scripts/build-node-release.mjs --target "${{ matrix.target }}"
+      # Build AND load against musl's own GCC runtime, not Ubuntu's glibc
+      # runtime. An Ubuntu musl-gcc wrapper cannot link ARM64 libgcc_s.so.1.
+      - name: Build, package and load the musl addon in Alpine
         if: endsWith(matrix.target, '-musl')
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes musl-tools
-      - name: Install Node build tooling
-        run: npm ci --omit=optional --ignore-scripts
-      # Use the package's own build:native script. It runs napi from npm/node,
-      # which is what keeps the committed @tuishot/node-* loader correct;
-      # running napi from the repository root rewrites index.cjs with the
-      # private workspace package name instead.
-      - name: Build the Node-API addon
-        shell: bash
-        run: npm run build:native --workspace @tuishot/node -- --target "${{ matrix.target }}"
-      - name: Locate the built addon and check the loader is untouched
-        id: addon
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! git diff --quiet -- npm/node/index.cjs; then
-            printf 'napi rewrote the committed npm/node/index.cjs loader\n' >&2
-            git diff -- npm/node/index.cjs >&2
-            exit 1
-          fi
-          mapfile -t addons < <(find npm/node -maxdepth 1 -name '*.node' -print | sort)
-          if [[ "${#addons[@]}" -ne 1 ]]; then
-            printf 'expected exactly one built addon in npm/node, found %d\n' "${#addons[@]}" >&2
-            printf '%s\n' "${addons[@]:-(none)}" >&2
-            exit 1
-          fi
-          printf 'path=%s\n' "${addons[0]}" >> "$GITHUB_OUTPUT"
-      - name: Generate the native npm package
-        shell: bash
-        run: |
-          node npm/scripts/generate-node-platform-package.mjs \
-            --target "${{ matrix.target }}" \
-            --addon "${{ steps.addon.outputs.path }}"
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/work" --workdir /work \
+            --env TARGET --env CARGO_INCREMENTAL=0 \
+            --env CARGO_TARGET_DIR=/work/target-musl-release \
+            rust:1.99.1-alpine3.22@sha256:bc6e2930b85b59037e34cec351754c45732ca7637a429a8f69ce05aa08e36ca2 \
+            sh -ec 'apk add --no-cache nodejs npm libgcc && node .github/scripts/build-node-release.mjs --target "$TARGET"'
       - uses: actions/upload-artifact@v4
         with:
           name: node-platform-${{ matrix.target }}

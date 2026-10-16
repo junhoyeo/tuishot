@@ -122,8 +122,11 @@ never publish mixed versions.
 2. **build-cli** builds `tuishot` for the 6 Unix targets, runs
    `tuishot --version` on each binary, makes a `.tar.gz` with a `.sha256`, and
    generates the `@tuishot/cli-*` platform package.
-3. **build-node** builds the Node-API addon for all 8 targets and generates the
-   `@tuishot/node-*` platform package.
+3. **build-node** uses Cargo directly for all 8 addon targets, preserves the
+   committed JavaScript/type definitions, and loads each packaged addon to
+   verify PNG/SVG/text/JSON rendering. The musl targets build and run in a
+   digest-pinned Alpine image so the GCC runtime matches the host libc.
+   It then uploads the `@tuishot/node-*` platform package.
 4. **build-wasm** builds `@tuishot/wasm` when the commit provides a `build:wasm`
    script.
 5. **github-release** collects every archive, writes one combined
