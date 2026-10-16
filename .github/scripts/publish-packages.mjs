@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 
 // Publishes one group of npm packages in a fixed order. The order matters:
 // a platform package must exist on the registry before the package that
-// declares it as an optional dependency, and @tuishot/cli must exist before
-// the unscoped tuishot alias that depends on it.
+// declares it as an optional dependency. The unscoped alias is held back
+// because npm rejected its name as too similar to teashot.
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -37,7 +37,7 @@ const { targets, cliTargets } = await importTargets();
 /** Each group lists directories to publish, in publish order. */
 const groups = {
   "cli-platforms": cliTargets.map((target) => `npm/platforms/${target.target}`),
-  cli: ["npm/cli", "npm/tuishot"],
+  cli: ["npm/cli"], // npm blocks the unscoped tuishot name as too similar to teashot.
   "node-platforms": targets.map((target) => `npm/node-platforms/${target.target}`),
   node: ["npm/node"],
   wasm: ["npm/wasm"],

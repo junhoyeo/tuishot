@@ -21,7 +21,7 @@ ab_glyph_rasterizer = "0.1.8"
 fontdue = "0.9.3"
 png = "0.18.1"
 ttf-parser = "0.25.1"
-tuishot-core = { version = "0.2.0", path = "../tuishot-core" }
+tuishot-core = { version = "0.2.1", path = "../tuishot-core" }
 
 [dev-dependencies]
 sha2 = "0.10.9"

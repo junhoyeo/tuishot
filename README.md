@@ -113,7 +113,7 @@ Tokscale and other Ratatui applications can convert a `Buffer` directly:
 
 ```toml
 [dev-dependencies]
-tuishot-ratatui = { version = "0.2.0", features = ["ratatui-0-29"] }
+tuishot-ratatui = { version = "0.2.1", features = ["ratatui-0-29"] }
 ```
 
 ```rust
@@ -179,23 +179,25 @@ The agent can inspect the PNG, assert text without OCR, and read exact cell colo
 
 ## Use from Node
 
-Three packages cover three different jobs. Pick by what you already have.
+Two published packages cover process capture and in-process rendering. The WASM package is still in development.
 
 | Package | Use it when | Needs a PTY | Platforms |
 | --- | --- | --- | --- |
-| `@tuishot/cli` (alias `tuishot`) | You want to drive a real TUI process and wait for state | Yes | macOS and Linux |
+| `@tuishot/cli` | You want to drive a real TUI process and wait for state | Yes | macOS and Linux |
 | `@tuishot/node` | You already have an ANSI string or a grid and want native speed | No | macOS, Linux, Windows |
-| `@tuishot/wasm` | You need the same renderer in a browser, Bun, Deno, or a bundler | No | Any WebAssembly runtime |
+| `@tuishot/wasm` (not yet published) | Planned browser, Bun, and Deno rendering | No | Pending parser-parity validation |
 
 ### Run the CLI without installing it
 
 ```sh
-npx tuishot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
-bunx tuishot -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
+npx @tuishot/cli -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
+bunx @tuishot/cli -o dashboard.png --size 120x40 --wait-text "Ready" -- my-tui
 ```
 
-The `tuishot` package is a thin alias for `@tuishot/cli`. Installing either one pulls exactly one
-prebuilt binary through `optionalDependencies`, selected by your platform, architecture, and libc.
+Install `@tuishot/cli`; its executable is still named `tuishot`. npm rejected the unscoped
+`tuishot` package name because it is too similar to `teashot`, so that alias is not published.
+Installing the scoped package pulls exactly one prebuilt binary through `optionalDependencies`,
+selected by your platform, architecture, and libc.
 No compiler and no `cargo` are required. If no matching package is installed, the launcher names the
 expected package instead of failing with a missing-file error.
 
@@ -209,7 +211,8 @@ const { png, json } = await shoot({
   size: "120x40",
   waitText: "Ready",
   formats: ["png", "json"],
-  env: { NO_COLOR: "0" },
+  envClear: true,
+  env: { TERM: "xterm-256color", COLORTERM: "truecolor" },
   timeout: "10s",
 });
 
@@ -242,19 +245,11 @@ Node-API calls with no process spawn. A bare `\n` starts a new row at column zer
 lands where you expect; existing CRLF is preserved. See `examples/ink` for Vitest snapshots of an Ink
 component.
 
-### Render in a browser, Bun, or Deno with `@tuishot/wasm`
+### Browser, Bun, and Deno rendering (planned)
 
-```ts
-import { renderAnsi } from "@tuishot/wasm";
-
-const { png, svg, txt, json } = await renderAnsi("\u001b[32mok\u001b[0m", { cols: 40, rows: 3 });
-```
-
-One WebAssembly binary serves every runtime. The root import resolves a loader through export
-conditions; `@tuishot/wasm/browser`, `/node`, `/bun`, and `/deno` select one explicitly. Call `init()`
-once if you want the synchronous `Renderer` class, or use the async helpers that initialize on first
-use. The font is embedded in the binary, so output is byte-identical across runtimes with no network
-or filesystem font lookup.
+`@tuishot/wasm` is not published yet. It remains on a development branch while
+parser-parity tests are completed. Use `@tuishot/node` for in-process rendering
+in Node.js today.
 
 ### Honest platform notes
 
@@ -262,15 +257,10 @@ or filesystem font lookup.
   x64, and Linux x64 and arm64 for both glibc and musl. The PTY driver in `tuishot-term` uses Unix
   process groups and signals, so it does not compile for `*-pc-windows-msvc` yet. A Windows ConPTY
   backend is planned post-launch. **Windows users can render in-process today** with `@tuishot/node`
-  or `@tuishot/wasm`, which never open a PTY.
+  without opening a PTY.
 - **`@tuishot/node` is a native addon.** It installs a prebuilt `.node` binary per platform. On an
   unlisted platform, installation succeeds but importing fails with the expected package name.
-  Use `@tuishot/wasm` there.
-- **`@tuishot/wasm` is a bounded emulator, not a terminal.** It parses static ANSI output. It does not
-  implement sixel, kitty or ReGIS graphics, hyperlinks, mouse or keyboard protocols, scrollback, or
-  reflow. The binary is about 780 KiB raw and 287 KiB Brotli-compressed, including the embedded font.
-- **`@tuishot/wasm` cannot spawn anything.** There is no `shoot` in wasm. Capture a TUI with the CLI
-  or `@tuishot/cli`, then render the resulting grid anywhere.
+  Check the supported target list before installing; the WASM fallback is not published yet.
 - **Emoji are best-effort in v0.1** in every package. Prefer text symbols for byte-stable snapshots.
 
 ## CJK, deterministic fonts, and emoji
