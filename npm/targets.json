@@ -69,6 +69,7 @@
       "platform": "win32",
       "arch": "x64",
       "binary": "tuishot.exe",
+      "cli": false,
       "nodePackage": "@tuishot/node-win32-x64-msvc",
       "addon": "tuishot.node"
     },
@@ -78,6 +79,7 @@
       "platform": "win32",
       "arch": "arm64",
       "binary": "tuishot.exe",
+      "cli": false,
       "nodePackage": "@tuishot/node-win32-arm64-msvc",
       "addon": "tuishot.node"
     }

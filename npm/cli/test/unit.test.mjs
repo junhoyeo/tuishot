@@ -15,9 +15,15 @@ test("package root import is side-effect-free", () => {
   assert.equal(typeof publicApi.runScenes, "function");
 });
 
-test("target matrix resolves exactly eight supported packages", () => {
-  assert.equal(TARGETS.length, 8);
-  assert.equal(new Set(TARGETS.map((target) => target.package)).size, 8);
+test("target matrix resolves exactly six supported CLI packages", () => {
+  // The CLI needs the Unix-only PTY driver, so win32 ships no @tuishot/cli-* package.
+  assert.equal(TARGETS.length, 6);
+  assert.equal(new Set(TARGETS.map((target) => target.package)).size, 6);
+  assert.equal(TARGETS.filter((target) => target.platform === "win32").length, 0);
+  assert.throws(
+    () => resolveTarget({ platform: "win32", arch: "x64" }),
+    /does not provide a native binary for win32\/x64/,
+  );
   for (const target of TARGETS) {
     const resolved = resolveTarget({
       platform: target.platform,

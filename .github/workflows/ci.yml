@@ -71,6 +71,8 @@ jobs:
         run: npm ci --omit=optional
       - name: Check Cargo/npm version and target-package coherence
         run: npm run check:packages
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
       - name: Build ESM, CommonJS, and declarations
         run: npm run build:npm
       - name: Type-check the public API

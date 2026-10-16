@@ -56,19 +56,5 @@ export const TARGETS = [
     "arch": "arm64",
     "libc": "musl",
     "binary": "tuishot"
-  },
-  {
-    "target": "x86_64-pc-windows-msvc",
-    "package": "@tuishot/cli-win32-x64-msvc",
-    "platform": "win32",
-    "arch": "x64",
-    "binary": "tuishot.exe"
-  },
-  {
-    "target": "aarch64-pc-windows-msvc",
-    "package": "@tuishot/cli-win32-arm64-msvc",
-    "platform": "win32",
-    "arch": "arm64",
-    "binary": "tuishot.exe"
   }
 ] as const satisfies readonly NativeTarget[];

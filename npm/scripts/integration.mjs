@@ -15,10 +15,10 @@ import {
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
 import { detectLibc } from "../cli/dist/esm/resolver.js";
-import { readCargoVersion, readJson, readTargets, repositoryRoot } from "./package-utils.mjs";
+import { cliTargets, readCargoVersion, readJson, readTargets, repositoryRoot } from "./package-utils.mjs";
 
 const version = readCargoVersion();
-const targets = readTargets();
+const targets = cliTargets(readTargets());
 const libc = process.platform === "linux" ? detectLibc() : undefined;
 const host = targets.find(
   (target) =>
