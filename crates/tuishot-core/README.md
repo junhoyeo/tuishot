@@ -12,7 +12,7 @@ outputs.
 
 ```toml
 [dependencies]
-tuishot-core = "0.1.0"
+tuishot-core = "0.2.0"
 ```
 
 API documentation is available on [docs.rs](https://docs.rs/tuishot-core).

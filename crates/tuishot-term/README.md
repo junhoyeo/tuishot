@@ -11,7 +11,7 @@ hard deadlines and clean up the complete child process group.
 
 ```toml
 [dependencies]
-tuishot-term = "0.1.0"
+tuishot-term = "0.2.0"
 ```
 
 API documentation is available on [docs.rs](https://docs.rs/tuishot-term).

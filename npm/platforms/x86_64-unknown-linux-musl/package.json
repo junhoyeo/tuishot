@@ -1,6 +1,6 @@
 {
   "name": "@tuishot/cli-linux-x64-musl",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "tuishot native binary for linux x64 musl",
   "license": "MIT",
   "engines": {

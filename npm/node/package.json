@@ -1,6 +1,6 @@
 {
   "name": "@tuishot/node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Render ANSI strings and tuishot grids in-process with native Node-API bindings",
   "license": "MIT",
   "type": "module",
@@ -53,13 +53,13 @@
     ]
   },
   "optionalDependencies": {
-    "@tuishot/node-darwin-arm64": "0.1.0",
-    "@tuishot/node-darwin-x64": "0.1.0",
-    "@tuishot/node-linux-x64-gnu": "0.1.0",
-    "@tuishot/node-linux-x64-musl": "0.1.0",
-    "@tuishot/node-linux-arm64-gnu": "0.1.0",
-    "@tuishot/node-linux-arm64-musl": "0.1.0",
-    "@tuishot/node-win32-x64-msvc": "0.1.0",
-    "@tuishot/node-win32-arm64-msvc": "0.1.0"
+    "@tuishot/node-darwin-arm64": "0.2.0",
+    "@tuishot/node-darwin-x64": "0.2.0",
+    "@tuishot/node-linux-x64-gnu": "0.2.0",
+    "@tuishot/node-linux-x64-musl": "0.2.0",
+    "@tuishot/node-linux-arm64-gnu": "0.2.0",
+    "@tuishot/node-linux-arm64-musl": "0.2.0",
+    "@tuishot/node-win32-x64-msvc": "0.2.0",
+    "@tuishot/node-win32-arm64-msvc": "0.2.0"
   }
 }

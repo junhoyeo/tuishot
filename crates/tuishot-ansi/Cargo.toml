@@ -22,4 +22,4 @@ alacritty = ["dep:alacritty_terminal"]
 
 [dependencies]
 alacritty_terminal = { version = "0.26.0", default-features = false, optional = true }
-tuishot-core = { version = "0.1.0", path = "../tuishot-core" }
+tuishot-core = { version = "0.2.0", path = "../tuishot-core" }
