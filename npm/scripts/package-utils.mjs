@@ -16,6 +16,18 @@ const expectedPackages = [
   "@tuishot/cli-win32-arm64-msvc",
 ];
 
+// The tuishot CLI needs the Unix-only PTY driver in tuishot-term, so no Windows
+// CLI binary exists yet. The Node-API addon skips the PTY driver and does build
+// for windows-msvc, so the win32 entries keep their @tuishot/node packages.
+const expectedCliTargets = [
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-gnu",
+  "aarch64-unknown-linux-musl",
+];
+
 const expectedNodePackages = [
   "@tuishot/node-darwin-arm64",
   "@tuishot/node-darwin-x64",
@@ -58,6 +70,11 @@ export function readCargoVersion() {
     throw new Error("Could not read [workspace.package].version from Cargo.toml");
   }
   return version;
+}
+
+/** Rust targets that produce a `tuishot` CLI binary and an `@tuishot/cli-*` package. */
+export function cliTargets(targets) {
+  return targets.filter((target) => target.cli !== false);
 }
 
 export function readTargets() {
@@ -140,6 +157,14 @@ ${expectedNodePackages.join("\n")}`,
     if (target.addon !== "tuishot.node") {
       throw new Error(`${target.target} must carry tuishot.node`);
     }
+    const wantsCli = expectedCliTargets.includes(target.target);
+    if (wantsCli) {
+      if (target.cli !== undefined) {
+        throw new Error(`${target.target} builds the CLI, so it must omit the cli field`);
+      }
+    } else if (target.cli !== false) {
+      throw new Error(`${target.target} has no CLI build, so it must declare "cli": false`);
+    }
     const expectedBinary = target.platform === "win32" ? "tuishot.exe" : "tuishot";
     if (target.binary !== expectedBinary) {
       throw new Error(`${target.target} must carry ${expectedBinary}`);
@@ -210,7 +235,7 @@ export function nodePlatformManifest(target, version) {
 }
 
 export function generatedTargetsTypeScript(targets) {
-  const runtimeTargets = targets.map(({ target, package: packageName, platform, arch, libc, binary }) => ({
+  const runtimeTargets = cliTargets(targets).map(({ target, package: packageName, platform, arch, libc, binary }) => ({
     target,
     package: packageName,
     platform,

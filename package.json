@@ -38,8 +38,6 @@
     "@tuishot/cli-linux-x64-musl": "file:npm/platforms/x86_64-unknown-linux-musl",
     "@tuishot/cli-linux-arm64-gnu": "file:npm/platforms/aarch64-unknown-linux-gnu",
     "@tuishot/cli-linux-arm64-musl": "file:npm/platforms/aarch64-unknown-linux-musl",
-    "@tuishot/cli-win32-x64-msvc": "file:npm/platforms/x86_64-pc-windows-msvc",
-    "@tuishot/cli-win32-arm64-msvc": "file:npm/platforms/aarch64-pc-windows-msvc",
     "@tuishot/node-darwin-arm64": "file:npm/node-platforms/aarch64-apple-darwin",
     "@tuishot/node-darwin-x64": "file:npm/node-platforms/x86_64-apple-darwin",
     "@tuishot/node-linux-x64-gnu": "file:npm/node-platforms/x86_64-unknown-linux-gnu",

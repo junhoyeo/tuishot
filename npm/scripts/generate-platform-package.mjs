@@ -27,6 +27,10 @@ if (!target) {
   console.error(`Unknown target ${targetName}; choose a target from npm/targets.json`);
   process.exit(2);
 }
+if (target.cli === false) {
+  console.error(`${targetName} declares "cli": false in npm/targets.json and ships no @tuishot/cli package`);
+  process.exit(2);
+}
 const sourceBinary = resolve(binaryPath);
 if (!existsSync(sourceBinary) || !statSync(sourceBinary).isFile()) {
   console.error(`Native binary does not exist or is not a file: ${sourceBinary}`);

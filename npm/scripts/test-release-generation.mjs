@@ -3,15 +3,15 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { readCargoVersion, readJson, readTargets, repositoryRoot } from "./package-utils.mjs";
+import { cliTargets, readCargoVersion, readJson, readTargets, repositoryRoot } from "./package-utils.mjs";
 
 const temporary = await mkdtemp(join(tmpdir(), "tuishot-release-generation-"));
 try {
   const fakeBinary = join(temporary, "input-binary");
   await writeFile(fakeBinary, "synthetic native artifact\n");
   await chmod(fakeBinary, 0o755);
-  const targets = readTargets();
-  assert.equal(targets.length, 8);
+  const targets = cliTargets(readTargets());
+  assert.equal(targets.length, 6);
   const outputRoot = join(temporary, "platforms");
   for (const target of targets) {
     const generated = spawnSync(

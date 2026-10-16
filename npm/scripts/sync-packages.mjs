@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   canonicalJson,
+  cliTargets,
   generatedTargetsTypeScript,
   nodePlatformManifest,
   platformManifest,
@@ -24,11 +25,12 @@ const nodeLoaderPath = resolve(repositoryRoot, "npm/node/index.cjs");
 const generatedTargetsPath = resolve(repositoryRoot, "npm/cli/src/targets.generated.ts");
 const platformsRoot = resolve(repositoryRoot, "npm/platforms");
 const nodePlatformsRoot = resolve(repositoryRoot, "npm/node-platforms");
+const cliBuildTargets = cliTargets(targets);
 const expectedNodePlatformDirs = new Set(targets.map((target) => target.target));
-const expectedPlatformDirs = new Set(targets.map((target) => target.target));
+const expectedPlatformDirs = new Set(cliBuildTargets.map((target) => target.target));
 const errors = [];
 const rootOptionalDependencies = Object.fromEntries([
-  ...targets.map((target) => [target.package, `file:npm/platforms/${target.target}`]),
+  ...cliBuildTargets.map((target) => [target.package, `file:npm/platforms/${target.target}`]),
   ...targets.map((target) => [target.nodePackage, `file:npm/node-platforms/${target.target}`]),
 ]);
 
@@ -53,7 +55,7 @@ expectFile(rootPath, canonicalJson(root));
 
 const cli = readJson(cliPath);
 cli.version = version;
-cli.optionalDependencies = Object.fromEntries(targets.map((target) => [target.package, version]));
+cli.optionalDependencies = Object.fromEntries(cliBuildTargets.map((target) => [target.package, version]));
 expectFile(cliPath, canonicalJson(cli));
 
 const node = readJson(nodePath);
@@ -79,15 +81,17 @@ expectFile(resolve(repositoryRoot, "npm/node/LICENSE-MIT"), license);
 expectFile(generatedTargetsPath, generatedTargetsTypeScript(targets));
 
 for (const target of targets) {
-  const directory = resolve(platformsRoot, target.target);
-  if (!check) {
-    // Release generation is deterministic. Only generated package directories live here.
-    rmSync(directory, { recursive: true, force: true });
-    const { mkdirSync } = await import("node:fs");
-    mkdirSync(resolve(directory, "bin"), { recursive: true });
+  if (target.cli !== false) {
+    const directory = resolve(platformsRoot, target.target);
+    if (!check) {
+      // Release generation is deterministic. Only generated package directories live here.
+      rmSync(directory, { recursive: true, force: true });
+      const { mkdirSync } = await import("node:fs");
+      mkdirSync(resolve(directory, "bin"), { recursive: true });
+    }
+    expectFile(resolve(directory, "package.json"), canonicalJson(platformManifest(target, version)));
+    expectFile(resolve(directory, "LICENSE-MIT"), license);
   }
-  expectFile(resolve(directory, "package.json"), canonicalJson(platformManifest(target, version)));
-  expectFile(resolve(directory, "LICENSE-MIT"), license);
 
   const nodeDirectory = resolve(nodePlatformsRoot, target.target);
   if (!check) {
@@ -142,7 +146,7 @@ if (!check) {
     const cliLock = lockfile.packages?.["npm/cli"];
     const nodeLock = lockfile.packages?.["npm/node"];
     const aliasLock = lockfile.packages?.["npm/tuishot"];
-    const wantedOptional = Object.fromEntries(targets.map((target) => [target.package, version]));
+    const wantedOptional = Object.fromEntries(cliBuildTargets.map((target) => [target.package, version]));
     const wantedNodeOptional = Object.fromEntries(targets.map((target) => [target.nodePackage, version]));
     const sortedEntries = (value = {}) => Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
     if (
@@ -171,7 +175,11 @@ if (!check) {
       const platformPath = `npm/platforms/${target.target}`;
       const platformLock = lockfile.packages?.[platformPath];
       const linkLock = lockfile.packages?.[`node_modules/${target.package}`];
-      if (
+      if (target.cli === false) {
+        if (platformLock || linkLock) {
+          errors.push(`package-lock must not contain ${target.package}; that target has no CLI build`);
+        }
+      } else if (
         platformLock?.name !== target.package ||
         platformLock?.version !== version ||
         platformLock?.optional !== true ||
