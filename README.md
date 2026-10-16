@@ -113,7 +113,7 @@ Tokscale and other Ratatui applications can convert a `Buffer` directly:
 
 ```toml
 [dev-dependencies]
-tuishot-ratatui = { version = "0.1.0", features = ["ratatui-0-29"] }
+tuishot-ratatui = { version = "0.2.0", features = ["ratatui-0-29"] }
 ```
 
 ```rust

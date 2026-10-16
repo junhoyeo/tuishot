@@ -4,8 +4,9 @@ Everything a release publishes comes from one tagged commit. The Cargo
 workspace version is the single source of truth, a `v*` tag starts the release,
 and `.github/workflows/release.yml` does the rest.
 
-Nothing publishes on a normal push or pull request. Only a `v*` tag can
-publish. A manual run can build and pack everything, but it cannot publish.
+Nothing publishes on a normal branch push or pull request. Only a `v*` tag
+can publish. A manual run on a branch is a dry run; a manual run targeting
+a matching version tag can publish only with `dry_run: false`.
 
 ## Current state before the first release
 
@@ -14,7 +15,8 @@ As of this document, the registries hold:
 - **crates.io**: `tuishot`, `tuishot-core`, `tuishot-render`, `tuishot-term`,
   and `tuishot-ratatui` at `0.1.0`. `tuishot-ansi` is a newer crate and is not
   published yet.
-- **npm**: nothing. All 18 packages are unpublished.
+- **npm**: nothing. The first release publishes 17 CLI and Node packages.
+  `@tuishot/wasm` is deferred until its parser-parity checks pass.
 
 So the launch release is `v0.2.0`, and it is the first publish for every npm
 package. Follow [First publish](#first-publish-and-how-to-turn-the-fallback-off)
@@ -25,7 +27,7 @@ for that release, then use the normal procedure afterwards.
 | Artifact | Count | Notes |
 | --- | --- | --- |
 | GitHub Release archives | 6 | `.tar.gz` plus a `.sha256`, and one combined `SHA256SUMS` |
-| npm packages | 18 | See [the package list](#npm-trusted-publisher-settings) |
+| npm packages | 17 initially | See [the package list](#npm-trusted-publisher-settings); WASM is deferred |
 | crates.io crates | 6 | `tuishot-core`, `tuishot-render`, `tuishot-ansi`, `tuishot-term`, `tuishot-ratatui`, `tuishot` |
 
 ### Target support
@@ -120,8 +122,11 @@ never publish mixed versions.
 2. **build-cli** builds `tuishot` for the 6 Unix targets, runs
    `tuishot --version` on each binary, makes a `.tar.gz` with a `.sha256`, and
    generates the `@tuishot/cli-*` platform package.
-3. **build-node** builds the Node-API addon for all 8 targets and generates the
-   `@tuishot/node-*` platform package.
+3. **build-node** uses Cargo directly for all 8 addon targets, preserves the
+   committed JavaScript/type definitions, and loads each packaged addon to
+   verify PNG/SVG/text/JSON rendering. The musl targets build and run in a
+   digest-pinned Alpine image so the GCC runtime matches the host libc.
+   It then uploads the `@tuishot/node-*` platform package.
 4. **build-wasm** builds `@tuishot/wasm` when the commit provides a `build:wasm`
    script.
 5. **github-release** collects every archive, writes one combined
@@ -178,7 +183,7 @@ repository, which `npm run sync:packages` already keeps correct.
 
 [npm-1755]: https://github.com/npm/documentation/issues/1755
 
-All 18 packages need the same settings:
+All 17 initial packages need the same settings. Configure the WASM package only after its later first publication:
 
 **CLI, 8 packages**
 
@@ -203,7 +208,7 @@ All 18 packages need the same settings:
 16. `@tuishot/node-win32-x64-msvc`
 17. `@tuishot/node-win32-arm64-msvc`
 
-**Wasm, 1 package**
+**Wasm, 1 deferred package (not part of v0.2.0)**
 
 18. `@tuishot/wasm`
 
@@ -244,8 +249,9 @@ tuishot package is on npm yet, so the first version of each package cannot use
 OIDC. For that one release only, use the token fallback.
 
 1. Create a **granular access token** on npm with publish rights for the
-   `@tuishot` scope and the `tuishot` package. Give it the shortest usable
-   expiry.
+   `@tuishot` scope and the `tuishot` package. An uncreated unscoped package
+   cannot be selected by name, so bootstrap may require temporary all-package
+   write access. Use the shortest usable expiry and revoke it after setup.
 2. Store it as the repository secret `NPM_TOKEN`.
 3. Push the release tag as usual. The automatic tag run will fail at the npm
    publish steps, because no package has a trusted publisher yet. That is
@@ -267,7 +273,7 @@ never reach the token path.
 
 **Turn it off afterwards:**
 
-1. Add the trusted publisher settings to all 18 packages, as listed above.
+1. Add the trusted publisher settings to all 17 published packages, as listed above.
 2. Revoke the npm token on npm.
 3. Delete the `NPM_TOKEN` repository secret.
 4. Confirm the next release logs `Using OIDC trusted publishing with
