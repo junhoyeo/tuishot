@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "tools": {
+    "wasmBindgen": "0.2.129",
+    "binaryen": "132.0.0",
+    "optimization": "-Oz"
+  },
+  "artifacts": {
+    "wasm": {
+      "raw": 781078,
+      "gzip9": 342970,
+      "brotli11": 286726
+    },
+    "wasmBindgenGlue": {
+      "raw": 26469,
+      "gzip9": 5327,
+      "brotli11": 4697
+    },
+    "runtimeLoaders": {
+      "raw": 6850,
+      "gzip9": 1458,
+      "brotli11": 1261
+    },
+    "packageTarball": {
+      "raw": 356820,
+      "gzip9": 356755,
+      "brotli11": 356825
+    }
+  },
+  "bundledFont": {
+    "raw": 273900,
+    "gzip9": 128175,
+    "brotli11": 105432,
+    "sha256": "a0bf60ef0f83c5ed4d7a75d45838548b1f6873372dfac88f71804491898d138f",
+    "note": "Included inside the wasm artifact; reported separately rather than double-counted."
+  },
+  "regressionPolicy": {
+    "relativePercent": 15,
+    "absoluteBytes": 16384
+  }
+}

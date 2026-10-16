@@ -21,8 +21,10 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --all-features --locked
-      - name: ANSI backend feature seam without default Alacritty
-        run: cargo check -p tuishot-ansi --no-default-features --locked
+      - name: ANSI backend feature seams
+        run: |
+          cargo check -p tuishot-ansi --no-default-features --locked
+          cargo check -p tuishot-ansi --no-default-features --features vte --locked
       - name: Render synthetic scene example
         run: cargo run --locked -p tuishot -- run crates/tuishot/examples/synthetic.toml
       - name: Ratatui feature matrix
@@ -149,3 +151,55 @@ jobs:
         run: npm --prefix examples/ink ci --ignore-scripts
       - name: Run the Ink renderToString snapshots
         run: npm --prefix examples/ink test
+
+  wasm:
+    name: WebAssembly / Node 18 / Bun / Deno
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.target
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> .target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+      - name: Install JavaScript build tooling
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Install the exactly matched wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - name: Check wasm dependency graph
+        run: npm run check:wasm:graph
+      - name: Check core, renderer, vte ANSI, and bindings for wasm32
+        run: |
+          cargo check --locked --target wasm32-unknown-unknown -p tuishot-core -p tuishot-render
+          cargo check --locked --target wasm32-unknown-unknown -p tuishot-ansi --no-default-features --features vte
+          cargo check --locked --target wasm32-unknown-unknown -p tuishot-wasm
+      - name: Build one wasm-bindgen web binary and optimize with pinned Binaryen
+        run: npm run build:wasm
+      - name: Type-check the stable public API
+        run: npm run typecheck:wasm
+      - name: Run Node wasm tests
+        run: npm run test:wasm
+      - name: Test clean packed Node consumer
+        run: npm run test:wasm:integration
+      - name: Check measured bundle-size baseline
+        run: npm run size:wasm
+      - name: Inspect @tuishot/wasm tarball
+        run: npm run pack:wasm:dry-run
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - name: Run actual Bun loader
+        run: bun npm/wasm/test/bun-smoke.mjs
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.9.7
+      - name: Run actual Deno loader
+        run: deno run --allow-read npm/wasm/test/deno-smoke.mjs

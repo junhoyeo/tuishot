@@ -1,0 +1,8 @@
+@tuishot/wasm bundles JetBrains Mono Regular 2.304 inside its single WebAssembly binary.
+
+The font is Copyright 2020 The JetBrains Mono Project Authors and is distributed
+under the SIL Open Font License, Version 1.1. See OFL-JetBrainsMono.txt and
+FONT-LICENSES.toml for the exact license text, source URL, and SHA-256.
+
+Rust and JavaScript source in this package is distributed under the MIT License.
+See LICENSE-MIT.

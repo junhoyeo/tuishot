@@ -4,7 +4,8 @@
   "workspaces": [
     "npm/cli",
     "npm/node",
-    "npm/tuishot"
+    "npm/tuishot",
+    "npm/wasm"
   ],
   "scripts": {
     "sync:packages": "node npm/scripts/sync-packages.mjs",
@@ -21,12 +22,20 @@
     "test:node:integration": "node npm/scripts/node-integration.mjs",
     "test:node:release-generation": "node npm/scripts/test-node-release-generation.mjs",
     "pack:node:dry-run": "npm pack --dry-run --workspace @tuishot/node",
-    "generate:node-platform": "node npm/scripts/generate-node-platform-package.mjs"
+    "generate:node-platform": "node npm/scripts/generate-node-platform-package.mjs",
+    "build:wasm": "npm run build --workspace @tuishot/wasm",
+    "test:wasm": "npm run test --workspace @tuishot/wasm",
+    "test:wasm:integration": "node npm/scripts/wasm-integration.mjs",
+    "check:wasm:graph": "node npm/scripts/check-wasm-graph.mjs",
+    "size:wasm": "node npm/scripts/report-wasm-size.mjs",
+    "pack:wasm:dry-run": "npm pack --dry-run --workspace @tuishot/wasm",
+    "typecheck:wasm": "npm run typecheck --workspace @tuishot/wasm"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
     "typescript": "^5.7.0",
-    "@napi-rs/cli": "^3.10.8"
+    "@napi-rs/cli": "^3.10.8",
+    "binaryen": "132.0.0"
   },
   "engines": {
     "node": ">=18"

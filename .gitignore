@@ -5,6 +5,7 @@
 # npm workspace build and release artifacts
 /node_modules/
 /npm/cli/dist/
+/npm/wasm/dist/
 /npm/platforms/*/bin/
 /tuishot-*.tgz
 /npm/**/*.tgz

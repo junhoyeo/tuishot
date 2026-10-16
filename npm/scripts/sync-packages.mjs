@@ -20,6 +20,7 @@ const rootPath = resolve(repositoryRoot, "package.json");
 const cliPath = resolve(repositoryRoot, "npm/cli/package.json");
 const aliasPath = resolve(repositoryRoot, "npm/tuishot/package.json");
 const nodePath = resolve(repositoryRoot, "npm/node/package.json");
+const wasmPath = resolve(repositoryRoot, "npm/wasm/package.json");
 const nodeLoaderPath = resolve(repositoryRoot, "npm/node/index.cjs");
 const generatedTargetsPath = resolve(repositoryRoot, "npm/cli/src/targets.generated.ts");
 const platformsRoot = resolve(repositoryRoot, "npm/platforms");
@@ -56,6 +57,10 @@ cli.version = version;
 cli.optionalDependencies = Object.fromEntries(targets.map((target) => [target.package, version]));
 expectFile(cliPath, canonicalJson(cli));
 
+const wasm = readJson(wasmPath);
+wasm.version = version;
+expectFile(wasmPath, canonicalJson(wasm));
+
 const node = readJson(nodePath);
 node.version = version;
 node.optionalDependencies = Object.fromEntries(targets.map((target) => [target.nodePackage, version]));
@@ -76,6 +81,15 @@ expectFile(aliasPath, canonicalJson(alias));
 expectFile(resolve(repositoryRoot, "npm/cli/LICENSE-MIT"), license);
 expectFile(resolve(repositoryRoot, "npm/tuishot/LICENSE-MIT"), license);
 expectFile(resolve(repositoryRoot, "npm/node/LICENSE-MIT"), license);
+expectFile(resolve(repositoryRoot, "npm/wasm/LICENSE-MIT"), license);
+expectFile(
+  resolve(repositoryRoot, "npm/wasm/OFL-JetBrainsMono.txt"),
+  readFileSync(resolve(repositoryRoot, "crates/tuishot-render/assets/OFL-JetBrainsMono.txt"), "utf8"),
+);
+expectFile(
+  resolve(repositoryRoot, "npm/wasm/FONT-LICENSES.toml"),
+  readFileSync(resolve(repositoryRoot, "crates/tuishot-render/assets/FONT-LICENSES.toml"), "utf8"),
+);
 expectFile(generatedTargetsPath, generatedTargetsTypeScript(targets));
 
 for (const target of targets) {
@@ -142,6 +156,7 @@ if (!check) {
     const cliLock = lockfile.packages?.["npm/cli"];
     const nodeLock = lockfile.packages?.["npm/node"];
     const aliasLock = lockfile.packages?.["npm/tuishot"];
+    const wasmLock = lockfile.packages?.["npm/wasm"];
     const wantedOptional = Object.fromEntries(targets.map((target) => [target.package, version]));
     const wantedNodeOptional = Object.fromEntries(targets.map((target) => [target.nodePackage, version]));
     const sortedEntries = (value = {}) => Object.entries(value).sort(([left], [right]) => left.localeCompare(right));
@@ -166,6 +181,9 @@ if (!check) {
     }
     if (aliasLock?.version !== version || aliasLock.dependencies?.["@tuishot/cli"] !== version) {
       errors.push("package-lock tuishot entry is out of sync");
+    }
+    if (wasmLock?.name !== "@tuishot/wasm" || wasmLock?.version !== version) {
+      errors.push("package-lock @tuishot/wasm entry is out of sync");
     }
     for (const target of targets) {
       const platformPath = `npm/platforms/${target.target}`;

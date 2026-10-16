@@ -1,0 +1,75 @@
+{
+  "name": "@tuishot/wasm",
+  "version": "0.1.0",
+  "description": "Deterministic in-process ANSI and Grid rendering for browsers, Node, Bun, and Deno",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "browser": "./browser.js",
+      "deno": "./deno.js",
+      "bun": "./bun.js",
+      "node": "./node.js",
+      "import": "./browser.js",
+      "default": "./browser.js"
+    },
+    "./browser": {
+      "types": "./index.d.ts",
+      "import": "./browser.js",
+      "default": "./browser.js"
+    },
+    "./node": {
+      "types": "./index.d.ts",
+      "import": "./node.js",
+      "default": "./node.js"
+    },
+    "./bun": {
+      "types": "./index.d.ts",
+      "import": "./bun.js",
+      "default": "./bun.js"
+    },
+    "./deno": {
+      "types": "./index.d.ts",
+      "import": "./deno.js",
+      "default": "./deno.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/build-metadata.json",
+    "dist/tuishot_wasm.js",
+    "dist/tuishot_wasm_bg.wasm",
+    "runtime.js",
+    "index.js",
+    "browser.js",
+    "node.js",
+    "bun.js",
+    "deno.js",
+    "index.d.ts",
+    "README.md",
+    "LICENSE-MIT",
+    "OFL-JetBrainsMono.txt",
+    "FONT-LICENSES.toml",
+    "NOTICE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/junhoyeo/tuishot.git",
+    "directory": "npm/wasm"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "node ../scripts/build-wasm.mjs",
+    "test": "node --test test/*.test.mjs",
+    "prepack": "node ../scripts/check-wasm-package.mjs",
+    "typecheck": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM test/types.ts"
+  }
+}
