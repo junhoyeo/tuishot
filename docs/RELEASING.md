@@ -8,26 +8,25 @@ Nothing publishes on a normal branch push or pull request. Only a `v*` tag
 can publish. A manual run on a branch is a dry run; a manual run targeting
 a matching version tag can publish only with `dry_run: false`.
 
-## Current state before the first release
+## Current registry state
 
-As of this document, the registries hold:
+Version 0.2.0 was published for the six Rust crates and sixteen scoped npm packages.
+The unscoped `tuishot` alias was rejected by npm as too similar to `teashot`.
+It remains a private workspace package and is excluded from publishing. Install
+`@tuishot/cli` instead; the command is still named `tuishot`.
 
-- **crates.io**: `tuishot`, `tuishot-core`, `tuishot-render`, `tuishot-term`,
-  and `tuishot-ratatui` at `0.1.0`. `tuishot-ansi` is a newer crate and is not
-  published yet.
-- **npm**: nothing. The first release publishes 17 CLI and Node packages.
-  `@tuishot/wasm` is deferred until its parser-parity checks pass.
+Version 0.2.1 corrects the executable permissions lost during CLI artifact transfer.
+The release workflow now restores packages after downloading and exercises an
+actual transported CLI package before any publishing job can start.
 
-So the launch release is `v0.2.0`, and it is the first publish for every npm
-package. Follow [First publish](#first-publish-and-how-to-turn-the-fallback-off)
-for that release, then use the normal procedure afterwards.
+`@tuishot/wasm` is deferred until its parser-parity checks pass.
 
 ## What the release contains
 
 | Artifact | Count | Notes |
 | --- | --- | --- |
 | GitHub Release archives | 6 | `.tar.gz` plus a `.sha256`, and one combined `SHA256SUMS` |
-| npm packages | 17 initially | See [the package list](#npm-trusted-publisher-settings); WASM is deferred |
+| npm packages | 16 | Scoped CLI and addon packages; unscoped alias and WASM are not published |
 | crates.io crates | 6 | `tuishot-core`, `tuishot-render`, `tuishot-ansi`, `tuishot-term`, `tuishot-ratatui`, `tuishot` |
 
 ### Target support
@@ -136,7 +135,7 @@ never publish mixed versions.
    exist on the registry before the package that lists it as an optional
    dependency:
    1. the 6 `@tuishot/cli-*` platform packages
-   2. `@tuishot/cli`, then the unscoped `tuishot` alias
+   2. `@tuishot/cli` (the unscoped alias is blocked by npm and is not published)
    3. the 8 `@tuishot/node-*` platform packages
    4. `@tuishot/node`
    5. `@tuishot/wasm`
@@ -183,34 +182,31 @@ repository, which `npm run sync:packages` already keeps correct.
 
 [npm-1755]: https://github.com/npm/documentation/issues/1755
 
-All 17 initial packages need the same settings. Configure the WASM package only after its later first publication:
+All sixteen published scoped packages need the same settings. Configure WASM only after its later first publication:
 
-**CLI, 8 packages**
+**CLI, 7 packages**
 
 1. `@tuishot/cli`
-2. `tuishot`
-3. `@tuishot/cli-darwin-arm64`
-4. `@tuishot/cli-darwin-x64`
-5. `@tuishot/cli-linux-x64-gnu`
-6. `@tuishot/cli-linux-x64-musl`
-7. `@tuishot/cli-linux-arm64-gnu`
-8. `@tuishot/cli-linux-arm64-musl`
+2. `@tuishot/cli-darwin-arm64`
+3. `@tuishot/cli-darwin-x64`
+4. `@tuishot/cli-linux-x64-gnu`
+5. `@tuishot/cli-linux-x64-musl`
+6. `@tuishot/cli-linux-arm64-gnu`
+7. `@tuishot/cli-linux-arm64-musl`
 
 **Node addon, 9 packages**
 
-9. `@tuishot/node`
-10. `@tuishot/node-darwin-arm64`
-11. `@tuishot/node-darwin-x64`
-12. `@tuishot/node-linux-x64-gnu`
-13. `@tuishot/node-linux-x64-musl`
-14. `@tuishot/node-linux-arm64-gnu`
-15. `@tuishot/node-linux-arm64-musl`
-16. `@tuishot/node-win32-x64-msvc`
-17. `@tuishot/node-win32-arm64-msvc`
+8. `@tuishot/node`
+9. `@tuishot/node-darwin-arm64`
+10. `@tuishot/node-darwin-x64`
+11. `@tuishot/node-linux-x64-gnu`
+12. `@tuishot/node-linux-x64-musl`
+13. `@tuishot/node-linux-arm64-gnu`
+14. `@tuishot/node-linux-arm64-musl`
+15. `@tuishot/node-win32-x64-msvc`
+16. `@tuishot/node-win32-arm64-msvc`
 
-**Wasm, 1 deferred package (not part of v0.2.0)**
-
-18. `@tuishot/wasm`
+**Deferred:** `@tuishot/wasm`. Do not configure or publish it until the WASM implementation is ready. The unscoped `tuishot` name remains blocked by npm.
 
 There are no `@tuishot/cli-win32-x64-msvc` or `@tuishot/cli-win32-arm64-msvc`
 packages. Do not create them.
@@ -244,9 +240,11 @@ workflow is needed.
 
 ## First publish, and how to turn the fallback off
 
-npm can only accept a trusted publisher on a package that **already exists**. No
-tuishot package is on npm yet, so the first version of each package cannot use
-OIDC. For that one release only, use the token fallback.
+Configure a trusted publisher on each existing package before selecting OIDC.
+The sixteen scoped packages now exist, but package-level publisher setup may
+still require an npm login/password confirmation. Bootstrap token publishing
+is temporary; remove it after those settings are verified. Future new packages
+such as WASM need their own first-publication setup.
 
 1. Create a **granular access token** on npm with publish rights for the
    `@tuishot` scope and the `tuishot` package. An uncreated unscoped package
@@ -273,7 +271,7 @@ never reach the token path.
 
 **Turn it off afterwards:**
 
-1. Add the trusted publisher settings to all 17 published packages, as listed above.
+1. Add the trusted publisher settings to all sixteen published scoped packages, as listed above.
 2. Revoke the npm token on npm.
 3. Delete the `NPM_TOKEN` repository secret.
 4. Confirm the next release logs `Using OIDC trusted publishing with

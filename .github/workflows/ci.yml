@@ -74,7 +74,7 @@ jobs:
       - name: Check the release manifest against the target matrix
         run: npm run check:release
       - name: Check portable native release packaging
-        run: node --test .github/scripts/build-node-release.test.mjs
+        run: node --test .github/scripts/build-node-release.test.mjs .github/scripts/restore-cli-artifacts.test.mjs
       - name: Build ESM, CommonJS, and declarations
         run: npm run build:npm
       - name: Type-check the public API

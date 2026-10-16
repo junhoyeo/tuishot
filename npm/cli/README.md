@@ -27,4 +27,4 @@ await runScenes("tuishot.toml");
 
 `shoot` invokes one platform-specific native binary and returns every requested format from one captured grid. The binary is installed through an exact-version optional package. The launcher never searches `PATH` for a fallback `tuishot` executable.
 
-The unscoped [`tuishot`](https://www.npmjs.com/package/tuishot) package is an alias that re-exports this API.
+Use `npx @tuishot/cli` or `bunx @tuishot/cli`. npm rejected the unscoped `tuishot` alias as too similar to `teashot`; it is not published. The installed executable is still named `tuishot`.

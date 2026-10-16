@@ -24,9 +24,9 @@ pedantic = "deny"
 napi = { version = "3", features = ["serde-json"] }
 napi-derive = "3"
 serde_json = "1.0.145"
-tuishot-ansi = { version = "0.2.0", path = "../tuishot-ansi" }
-tuishot-core = { version = "0.2.0", path = "../tuishot-core" }
-tuishot-render = { version = "0.2.0", path = "../tuishot-render" }
+tuishot-ansi = { version = "0.2.1", path = "../tuishot-ansi" }
+tuishot-core = { version = "0.2.1", path = "../tuishot-core" }
+tuishot-render = { version = "0.2.1", path = "../tuishot-render" }
 
 [build-dependencies]
 napi-build = "2"

@@ -1,6 +1,6 @@
 # tuishot
 
-Unscoped alias for [`@tuishot/cli`](https://www.npmjs.com/package/@tuishot/cli).
+Reserved source for an unpublished alias of [`@tuishot/cli`](https://www.npmjs.com/package/@tuishot/cli). npm rejected this name as too similar to `teashot`; this workspace package is private until the name is approved. Use `@tuishot/cli` instead.
 
 ```sh
 npm install --save-dev tuishot

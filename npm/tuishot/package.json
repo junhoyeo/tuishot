@@ -1,6 +1,7 @@
 {
   "name": "tuishot",
-  "version": "0.2.0",
+  "private": true,
+  "version": "0.2.1",
   "description": "Alias for @tuishot/cli",
   "license": "MIT",
   "type": "module",
@@ -30,7 +31,7 @@
     "LICENSE-MIT"
   ],
   "dependencies": {
-    "@tuishot/cli": "0.2.0"
+    "@tuishot/cli": "0.2.1"
   },
   "repository": {
     "type": "git",

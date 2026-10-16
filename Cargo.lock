@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clap",
  "regex",
@@ -2108,7 +2108,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-ansi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "alacritty_terminal",
  "tuishot-core",
@@ -2116,7 +2116,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-node"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "napi",
  "napi-build",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-ratatui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ratatui 0.29.0",
  "ratatui 0.30.2",
@@ -2149,7 +2149,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-render"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "ab_glyph_rasterizer",
  "fontdue",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "tuishot-term"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "alacritty_terminal",
  "nix 0.30.1",

@@ -67,12 +67,16 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const targetDirectory = resolve(
-  process.env.CARGO_TARGET_DIR ?? resolve(repositoryRoot, "target"),
-);
-const nativeBinary = join(targetDirectory, "debug", process.platform === "win32" ? "tuishot.exe" : "tuishot");
-run("cargo", ["build", "--locked", "-p", "tuishot"]);
-assert.ok(existsSync(nativeBinary), `missing locally built binary ${nativeBinary}`);
+const artifactFlag = process.argv.indexOf("--platform-package");
+const suppliedPlatform = artifactFlag === -1 ? undefined : process.argv[artifactFlag + 1];
+if (artifactFlag !== -1 && !suppliedPlatform) throw new Error("--platform-package requires a directory");
+const targetDirectory = resolve(process.env.CARGO_TARGET_DIR ?? resolve(repositoryRoot, "target"));
+const nativeBinary = suppliedPlatform
+  ? join(resolve(suppliedPlatform), "bin", host.binary)
+  : join(targetDirectory, "debug", host.binary);
+if (!suppliedPlatform) run("cargo", ["build", "--locked", "-p", "tuishot"]);
+assert.ok(existsSync(nativeBinary), `missing native binary ${nativeBinary}`);
+assert.ok((statSync(nativeBinary).mode & 0o111) !== 0, "native release binary must already be executable");
 
 const temporary = mkdtempSync(join(tmpdir(), "tuishot-packed-integration-"));
 try {
@@ -84,20 +88,17 @@ try {
   mkdirSync(stage, { recursive: true });
   mkdirSync(consumer, { recursive: true });
 
-  run(
-    process.execPath,
-    [
-      resolve(repositoryRoot, "npm/scripts/generate-platform-package.mjs"),
-      "--target",
-      host.target,
-      "--binary",
-      nativeBinary,
-      "--output-root",
-      platforms,
-    ],
-    { cwd: repositoryRoot },
-  );
   const platformDirectory = join(platforms, host.target);
+  if (suppliedPlatform) {
+    // Exercise the downloaded-and-restored artifact as-is. Do not run the
+    // generator here: it would hide missing execute bits in release packages.
+    cpSync(resolve(suppliedPlatform), platformDirectory, { recursive: true });
+  } else {
+    run(process.execPath, [
+      resolve(repositoryRoot, "npm/scripts/generate-platform-package.mjs"),
+      "--target", host.target, "--binary", nativeBinary, "--output-root", platforms,
+    ]);
+  }
   const platformPack = pack(platformDirectory, cache);
   const platformTarball = platformPack.tarball;
   assert.deepEqual(platformPack.files, ["LICENSE-MIT", `bin/${host.binary}`, "package.json"]);
