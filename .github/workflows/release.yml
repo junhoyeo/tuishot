@@ -1,0 +1,797 @@
+name: Release
+
+# Publishes a tagged release. Nothing here runs on a normal push or pull
+# request: every job is gated on a v* tag or an explicit manual dispatch, and
+# every publish step additionally re-checks that gate at run time.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and pack every artifact without publishing anything.
+        type: boolean
+        default: true
+      use_npm_token:
+        description: >-
+          FIRST PUBLISH ONLY. Authenticate npm with the NPM_TOKEN secret instead
+          of OIDC trusted publishing. npm can only accept a trusted publisher on
+          a package that already exists, so the very first version of each
+          package needs a token. Leave this false afterwards; see
+          docs/RELEASING.md.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Resolves the release version once and refuses to continue when the tag, the
+  # Cargo workspace version, and the generated npm manifests disagree.
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+      - name: Resolve and verify the release version
+        id: resolve
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          node .github/scripts/release-version.mjs \
+            --ref-type "$REF_TYPE" \
+            --ref-name "$REF_NAME" \
+            --dry-run "${DRY_RUN:-false}" \
+            | tee -a "$GITHUB_OUTPUT"
+      - name: Check the release manifest against npm/targets.json
+        run: node npm/scripts/check-release-manifest.mjs
+      - name: Check generated npm manifests and the lockfile
+        run: |
+          npm ci --omit=optional --ignore-scripts
+          npm run check:packages
+
+  # The tuishot CLI needs the Unix-only PTY driver in tuishot-term, so there is
+  # no Windows CLI binary. Keep this list identical to the targets in
+  # npm/targets.json that do not declare "cli": false.
+  build-cli:
+    name: CLI ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # release-manifest:cli-targets:begin
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          # release-manifest:cli-targets:end
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Install the musl toolchain
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes musl-tools
+      - name: Build the release binary
+        run: cargo build --locked --release --package tuishot --target ${{ matrix.target }}
+      - name: Verify the binary runs
+        run: ./target/${{ matrix.target }}/release/tuishot --version
+      # Unix targets ship a .tar.gz. A Windows CLI target would ship a .zip, but
+      # there is no Windows CLI build yet; see docs/RELEASING.md.
+      - name: Create the archive and checksum
+        id: archive
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="tuishot-$VERSION-$TARGET"
+          staging="$(mktemp -d)/$name"
+          mkdir -p "$staging" dist
+          if [[ "$TARGET" == *windows* ]]; then
+            cp "target/$TARGET/release/tuishot.exe" "$staging/"
+          else
+            cp "target/$TARGET/release/tuishot" "$staging/"
+          fi
+          cp README.md LICENSE-MIT "$staging/"
+          if [[ "$TARGET" == *windows* ]]; then
+            archive="$name.zip"
+            (cd "$(dirname "$staging")" && 7z a -tzip -mx=9 "$archive" "$name" > /dev/null)
+            mv "$(dirname "$staging")/$archive" "dist/$archive"
+          else
+            archive="$name.tar.gz"
+            tar -czf "dist/$archive" -C "$(dirname "$staging")" "$name"
+          fi
+          if command -v sha256sum > /dev/null 2>&1; then
+            checksum="$(sha256sum "dist/$archive" | cut -d" " -f1)"
+          else
+            checksum="$(shasum -a 256 "dist/$archive" | cut -d" " -f1)"
+          fi
+          printf '%s  %s\n' "$checksum" "$archive" > "dist/$archive.sha256"
+          cat "dist/$archive.sha256"
+      - name: Generate the native npm package
+        env:
+          TARGET: ${{ matrix.target }}
+        run: node npm/scripts/generate-platform-package.mjs --target "$TARGET" --binary "target/$TARGET/release/tuishot"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-archive-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-platform-${{ matrix.target }}
+          path: npm/platforms/${{ matrix.target }}/
+          if-no-files-found: error
+          include-hidden-files: true
+
+  # The Node-API addon does not use the PTY driver, so it builds for every
+  # target including windows-msvc.
+  build-node:
+    name: Node addon ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # release-manifest:node-targets:begin
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            runner: macos-15
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-24.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-pc-windows-msvc
+            runner: windows-2025
+          - target: aarch64-pc-windows-msvc
+            runner: windows-11-arm
+          # release-manifest:node-targets:end
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-node-${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+      - name: Install the musl toolchain
+        if: endsWith(matrix.target, '-musl')
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes musl-tools
+      - name: Install Node build tooling
+        run: npm ci --omit=optional --ignore-scripts
+      # Use the package's own build:native script. It runs napi from npm/node,
+      # which is what keeps the committed @tuishot/node-* loader correct;
+      # running napi from the repository root rewrites index.cjs with the
+      # private workspace package name instead.
+      - name: Build the Node-API addon
+        shell: bash
+        run: npm run build:native --workspace @tuishot/node -- --target "${{ matrix.target }}"
+      - name: Locate the built addon and check the loader is untouched
+        id: addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- npm/node/index.cjs; then
+            printf 'napi rewrote the committed npm/node/index.cjs loader\n' >&2
+            git diff -- npm/node/index.cjs >&2
+            exit 1
+          fi
+          mapfile -t addons < <(find npm/node -maxdepth 1 -name '*.node' -print | sort)
+          if [[ "${#addons[@]}" -ne 1 ]]; then
+            printf 'expected exactly one built addon in npm/node, found %d\n' "${#addons[@]}" >&2
+            printf '%s\n' "${addons[@]:-(none)}" >&2
+            exit 1
+          fi
+          printf 'path=%s\n' "${addons[0]}" >> "$GITHUB_OUTPUT"
+      - name: Generate the native npm package
+        shell: bash
+        run: |
+          node npm/scripts/generate-node-platform-package.mjs \
+            --target "${{ matrix.target }}" \
+            --addon "${{ steps.addon.outputs.path }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: node-platform-${{ matrix.target }}
+          path: npm/node-platforms/${{ matrix.target }}/
+          if-no-files-found: error
+          include-hidden-files: true
+
+  # @tuishot/wasm is a single portable artifact, so one job builds it.
+  build-wasm:
+    name: Wasm bundle
+    needs: plan
+    runs-on: ubuntu-24.04
+    outputs:
+      built: ${{ steps.build.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-wasm
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+      - name: Build the wasm bundle when this branch provides one
+        id: build
+        run: |
+          set -euo pipefail
+          if ! node -e 'process.exit(require("./package.json").scripts["build:wasm"] ? 0 : 1)'; then
+            printf 'This commit has no build:wasm script, so @tuishot/wasm is not part of this release.\n'
+            printf 'built=false\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          npm ci --omit=optional --ignore-scripts
+          npm run build:wasm
+          printf 'built=true\n' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: steps.build.outputs.built == 'true'
+        with:
+          name: wasm-dist
+          path: npm/wasm/dist/
+          if-no-files-found: error
+
+  # Attaches every archive and checksum to the GitHub Release. This is the only
+  # job allowed to write to the repository, and only for a v* tag.
+  github-release:
+    name: GitHub Release
+    needs: [plan, build-cli, build-node, build-wasm]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-archive-*
+          path: downloads
+          merge-multiple: true
+      - name: Collect archives and one combined checksum file
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find downloads -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv -- {} dist/ \;
+          cd dist
+          cat ../downloads/*.sha256 > "tuishot-$VERSION-SHA256SUMS" 2>/dev/null || true
+          if [[ ! -s "tuishot-$VERSION-SHA256SUMS" ]]; then
+            find . -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' \) -print0 \
+              | sort -z \
+              | xargs -0 sha256sum > "tuishot-$VERSION-SHA256SUMS"
+            sed -i 's#\./##' "tuishot-$VERSION-SHA256SUMS"
+          fi
+          sha256sum --check --strict "tuishot-$VERSION-SHA256SUMS"
+          ls -l
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "$TAG" \
+              --generate-notes \
+              --verify-tag
+          fi
+
+  # Platform packages must exist on the registry before the parent package that
+  # declares them as optional dependencies, so the groups run in a chain:
+  # CLI platforms -> @tuishot/cli -> tuishot, then Node platforms ->
+  # @tuishot/node, then @tuishot/wasm.
+  #
+  # Every `npm publish` runs in THIS file on purpose. npm trusted publishing
+  # validates the calling workflow's filename, and its own docs warn that a
+  # `workflow_call` indirection "can cause configuration mismatches"
+  # (npm/documentation#1755 is still open). Keeping the publish steps inline
+  # means the single trusted-publisher setting `release.yml` is correct.
+  #
+  # The published package names are listed here so
+  # npm/scripts/check-release-manifest.mjs can compare them against
+  # npm/targets.json and fail the release if the two ever drift.
+  # release-manifest:cli-platform-packages:begin
+  # - @tuishot/cli-darwin-arm64
+  # - @tuishot/cli-darwin-x64
+  # - @tuishot/cli-linux-x64-gnu
+  # - @tuishot/cli-linux-x64-musl
+  # - @tuishot/cli-linux-arm64-gnu
+  # - @tuishot/cli-linux-arm64-musl
+  # release-manifest:cli-platform-packages:end
+  publish-cli-platforms:
+    name: npm publish CLI platforms
+    needs: [plan, build-cli]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived npm
+      # credential, and provenance signs the attestation with it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+          registry-url: https://registry.npmjs.org/
+      - name: Install a trusted-publishing capable npm
+        env:
+          REQUIRED_NPM: 11.5.1
+        run: |
+          set -euo pipefail
+          npm install --global npm@^11.5.1
+          node --version
+          installed="$(npm --version)"
+          printf 'npm %s\n' "$installed"
+          oldest="$(printf '%s\n%s\n' "$installed" "$REQUIRED_NPM" | sort --version-sort | head -1)"
+          if [[ "$oldest" != "$REQUIRED_NPM" && "$installed" != "$REQUIRED_NPM" ]]; then
+            printf 'npm %s is older than %s and cannot use trusted publishing\n' "$installed" "$REQUIRED_NPM" >&2
+            exit 1
+          fi
+      - name: Select the npm credential
+        env:
+          USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+            if [[ -z "$NPM_TOKEN" ]]; then
+              printf 'use_npm_token is true but the NPM_TOKEN secret is empty.\n' >&2
+              exit 1
+            fi
+            printf 'First-publish mode: authenticating with the NPM_TOKEN secret.\n'
+            printf 'Provenance needs OIDC, so this run publishes without it.\n'
+            printf 'TUISHOT_NPM_AUTH=token\n' >> "$GITHUB_ENV"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_TOKEN" >> "$GITHUB_ENV"
+          else
+            printf 'Using OIDC trusted publishing with provenance.\n'
+            printf 'TUISHOT_NPM_AUTH=oidc\n' >> "$GITHUB_ENV"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-platform-*
+          path: incoming
+      # Each build job uploads one artifact per target, so the artifact name
+      # prefix has to be stripped back to the plain Rust target directory.
+      - name: Restore the generated platform directory layout
+        env:
+          ROOT: npm/platforms
+          PREFIX: cli-platform-
+        run: |
+          set -euo pipefail
+          mkdir -p "$ROOT"
+          found=0
+          for directory in incoming/"$PREFIX"*; do
+            [[ -d "$directory" ]] || continue
+            target="$(basename "$directory")"
+            target="${target#"$PREFIX"}"
+            if [[ -z "$target" ]]; then
+              printf 'artifact %s has no target suffix\n' "$directory" >&2
+              exit 1
+            fi
+            rm -rf "${ROOT:?}/${target:?}"
+            mv "$directory" "$ROOT/$target"
+            found=$((found + 1))
+          done
+          if [[ "$found" -eq 0 ]]; then
+            printf 'no %s* artifacts were downloaded\n' "$PREFIX" >&2
+            exit 1
+          fi
+          printf 'Restored %d platform packages into %s\n' "$found" "$ROOT"
+          ls -l "$ROOT"
+      - name: Install dependencies
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
+      - name: Publish
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/publish-packages.mjs --kind cli-platforms --version "$VERSION"
+
+  publish-cli:
+    name: npm publish @tuishot/cli and tuishot
+    needs: [plan, publish-cli-platforms]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived npm
+      # credential, and provenance signs the attestation with it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+          registry-url: https://registry.npmjs.org/
+      - name: Install a trusted-publishing capable npm
+        env:
+          REQUIRED_NPM: 11.5.1
+        run: |
+          set -euo pipefail
+          npm install --global npm@^11.5.1
+          node --version
+          installed="$(npm --version)"
+          printf 'npm %s\n' "$installed"
+          oldest="$(printf '%s\n%s\n' "$installed" "$REQUIRED_NPM" | sort --version-sort | head -1)"
+          if [[ "$oldest" != "$REQUIRED_NPM" && "$installed" != "$REQUIRED_NPM" ]]; then
+            printf 'npm %s is older than %s and cannot use trusted publishing\n' "$installed" "$REQUIRED_NPM" >&2
+            exit 1
+          fi
+      - name: Select the npm credential
+        env:
+          USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+            if [[ -z "$NPM_TOKEN" ]]; then
+              printf 'use_npm_token is true but the NPM_TOKEN secret is empty.\n' >&2
+              exit 1
+            fi
+            printf 'First-publish mode: authenticating with the NPM_TOKEN secret.\n'
+            printf 'Provenance needs OIDC, so this run publishes without it.\n'
+            printf 'TUISHOT_NPM_AUTH=token\n' >> "$GITHUB_ENV"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_TOKEN" >> "$GITHUB_ENV"
+          else
+            printf 'Using OIDC trusted publishing with provenance.\n'
+            printf 'TUISHOT_NPM_AUTH=oidc\n' >> "$GITHUB_ENV"
+          fi
+      - name: Install dependencies
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Build the published JavaScript
+        run: npm run build:npm
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
+      - name: Publish
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/publish-packages.mjs --kind cli --version "$VERSION"
+
+  # release-manifest:node-platform-packages:begin
+  # - @tuishot/node-darwin-arm64
+  # - @tuishot/node-darwin-x64
+  # - @tuishot/node-linux-x64-gnu
+  # - @tuishot/node-linux-x64-musl
+  # - @tuishot/node-linux-arm64-gnu
+  # - @tuishot/node-linux-arm64-musl
+  # - @tuishot/node-win32-x64-msvc
+  # - @tuishot/node-win32-arm64-msvc
+  # release-manifest:node-platform-packages:end
+  publish-node-platforms:
+    name: npm publish Node addon platforms
+    needs: [plan, build-node]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived npm
+      # credential, and provenance signs the attestation with it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+          registry-url: https://registry.npmjs.org/
+      - name: Install a trusted-publishing capable npm
+        env:
+          REQUIRED_NPM: 11.5.1
+        run: |
+          set -euo pipefail
+          npm install --global npm@^11.5.1
+          node --version
+          installed="$(npm --version)"
+          printf 'npm %s\n' "$installed"
+          oldest="$(printf '%s\n%s\n' "$installed" "$REQUIRED_NPM" | sort --version-sort | head -1)"
+          if [[ "$oldest" != "$REQUIRED_NPM" && "$installed" != "$REQUIRED_NPM" ]]; then
+            printf 'npm %s is older than %s and cannot use trusted publishing\n' "$installed" "$REQUIRED_NPM" >&2
+            exit 1
+          fi
+      - name: Select the npm credential
+        env:
+          USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+            if [[ -z "$NPM_TOKEN" ]]; then
+              printf 'use_npm_token is true but the NPM_TOKEN secret is empty.\n' >&2
+              exit 1
+            fi
+            printf 'First-publish mode: authenticating with the NPM_TOKEN secret.\n'
+            printf 'Provenance needs OIDC, so this run publishes without it.\n'
+            printf 'TUISHOT_NPM_AUTH=token\n' >> "$GITHUB_ENV"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_TOKEN" >> "$GITHUB_ENV"
+          else
+            printf 'Using OIDC trusted publishing with provenance.\n'
+            printf 'TUISHOT_NPM_AUTH=oidc\n' >> "$GITHUB_ENV"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: node-platform-*
+          path: incoming
+      # Each build job uploads one artifact per target, so the artifact name
+      # prefix has to be stripped back to the plain Rust target directory.
+      - name: Restore the generated platform directory layout
+        env:
+          ROOT: npm/node-platforms
+          PREFIX: node-platform-
+        run: |
+          set -euo pipefail
+          mkdir -p "$ROOT"
+          found=0
+          for directory in incoming/"$PREFIX"*; do
+            [[ -d "$directory" ]] || continue
+            target="$(basename "$directory")"
+            target="${target#"$PREFIX"}"
+            if [[ -z "$target" ]]; then
+              printf 'artifact %s has no target suffix\n' "$directory" >&2
+              exit 1
+            fi
+            rm -rf "${ROOT:?}/${target:?}"
+            mv "$directory" "$ROOT/$target"
+            found=$((found + 1))
+          done
+          if [[ "$found" -eq 0 ]]; then
+            printf 'no %s* artifacts were downloaded\n' "$PREFIX" >&2
+            exit 1
+          fi
+          printf 'Restored %d platform packages into %s\n' "$found" "$ROOT"
+          ls -l "$ROOT"
+      - name: Install dependencies
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
+      - name: Publish
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/publish-packages.mjs --kind node-platforms --version "$VERSION"
+
+  publish-node:
+    name: npm publish @tuishot/node
+    needs: [plan, publish-node-platforms]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived npm
+      # credential, and provenance signs the attestation with it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+          registry-url: https://registry.npmjs.org/
+      - name: Install a trusted-publishing capable npm
+        env:
+          REQUIRED_NPM: 11.5.1
+        run: |
+          set -euo pipefail
+          npm install --global npm@^11.5.1
+          node --version
+          installed="$(npm --version)"
+          printf 'npm %s\n' "$installed"
+          oldest="$(printf '%s\n%s\n' "$installed" "$REQUIRED_NPM" | sort --version-sort | head -1)"
+          if [[ "$oldest" != "$REQUIRED_NPM" && "$installed" != "$REQUIRED_NPM" ]]; then
+            printf 'npm %s is older than %s and cannot use trusted publishing\n' "$installed" "$REQUIRED_NPM" >&2
+            exit 1
+          fi
+      - name: Select the npm credential
+        env:
+          USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+            if [[ -z "$NPM_TOKEN" ]]; then
+              printf 'use_npm_token is true but the NPM_TOKEN secret is empty.\n' >&2
+              exit 1
+            fi
+            printf 'First-publish mode: authenticating with the NPM_TOKEN secret.\n'
+            printf 'Provenance needs OIDC, so this run publishes without it.\n'
+            printf 'TUISHOT_NPM_AUTH=token\n' >> "$GITHUB_ENV"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_TOKEN" >> "$GITHUB_ENV"
+          else
+            printf 'Using OIDC trusted publishing with provenance.\n'
+            printf 'TUISHOT_NPM_AUTH=oidc\n' >> "$GITHUB_ENV"
+          fi
+      - name: Install dependencies
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
+      - name: Publish
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/publish-packages.mjs --kind node --version "$VERSION"
+
+  # @tuishot/wasm arrives on a separate branch. Until that branch adds the
+  # build:wasm script and npm/wasm, build-wasm reports built=false and this job
+  # is skipped instead of failing the release.
+  publish-wasm:
+    name: npm publish @tuishot/wasm
+    needs: [plan, build-wasm]
+    if: needs.plan.outputs.publish == 'true' && needs.build-wasm.outputs.built == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Trusted publishing exchanges this OIDC token for a short-lived npm
+      # credential, and provenance signs the attestation with it.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14
+          registry-url: https://registry.npmjs.org/
+      - name: Install a trusted-publishing capable npm
+        env:
+          REQUIRED_NPM: 11.5.1
+        run: |
+          set -euo pipefail
+          npm install --global npm@^11.5.1
+          node --version
+          installed="$(npm --version)"
+          printf 'npm %s\n' "$installed"
+          oldest="$(printf '%s\n%s\n' "$installed" "$REQUIRED_NPM" | sort --version-sort | head -1)"
+          if [[ "$oldest" != "$REQUIRED_NPM" && "$installed" != "$REQUIRED_NPM" ]]; then
+            printf 'npm %s is older than %s and cannot use trusted publishing\n' "$installed" "$REQUIRED_NPM" >&2
+            exit 1
+          fi
+      - name: Select the npm credential
+        env:
+          USE_NPM_TOKEN: ${{ inputs.use_npm_token }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "$USE_NPM_TOKEN" == "true" ]]; then
+            if [[ -z "$NPM_TOKEN" ]]; then
+              printf 'use_npm_token is true but the NPM_TOKEN secret is empty.\n' >&2
+              exit 1
+            fi
+            printf 'First-publish mode: authenticating with the NPM_TOKEN secret.\n'
+            printf 'Provenance needs OIDC, so this run publishes without it.\n'
+            printf 'TUISHOT_NPM_AUTH=token\n' >> "$GITHUB_ENV"
+            printf 'NODE_AUTH_TOKEN=%s\n' "$NPM_TOKEN" >> "$GITHUB_ENV"
+          else
+            printf 'Using OIDC trusted publishing with provenance.\n'
+            printf 'TUISHOT_NPM_AUTH=oidc\n' >> "$GITHUB_ENV"
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: wasm-dist
+          path: npm/wasm/dist
+      - name: Install dependencies
+        run: npm ci --omit=optional --ignore-scripts
+      - name: Check the release manifest against the target matrix
+        run: npm run check:release
+      - name: Publish
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: node .github/scripts/publish-packages.mjs --kind wasm --version "$VERSION"
+
+  # crates.io in dependency order. tuishot-node and tuishot-wasm are not
+  # published: both carry `publish = false` and exist only to build npm
+  # artifacts.
+  publish-crates:
+    name: crates.io publish
+    needs: [plan, build-cli]
+    if: needs.plan.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-crates
+      - name: Request a short-lived crates.io token
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1.0.5
+        continue-on-error: true
+      - name: Resolve the crates.io credential
+        id: credential
+        env:
+          TRUSTED_TOKEN: ${{ steps.auth.outputs.token }}
+          FALLBACK_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TRUSTED_TOKEN" ]]; then
+            printf 'Using a short-lived crates.io trusted-publishing token.\n'
+            printf '::add-mask::%s\n' "$TRUSTED_TOKEN"
+            printf 'token=%s\n' "$TRUSTED_TOKEN" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$FALLBACK_TOKEN" ]]; then
+            printf 'Trusted publishing is unavailable; using the CARGO_REGISTRY_TOKEN secret.\n'
+            printf 'token=%s\n' "$FALLBACK_TOKEN" >> "$GITHUB_OUTPUT"
+          else
+            printf 'No crates.io credential. Configure trusted publishing for every crate, or set CARGO_REGISTRY_TOKEN.\n' >&2
+            exit 1
+          fi
+      - name: Publish each crate in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.credential.outputs.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          # tuishot-core has no local dependencies. tuishot-render and
+          # tuishot-ansi depend on it. tuishot-term depends on tuishot-ansi.
+          # tuishot-ratatui and tuishot depend on the layers above them.
+          for crate in tuishot-core tuishot-render tuishot-ansi tuishot-term tuishot-ratatui tuishot; do
+            if curl --silent --show-error --fail \
+                --user-agent "tuishot-release (+https://github.com/junhoyeo/tuishot)" \
+                "https://crates.io/api/v1/crates/$crate/$VERSION" > /dev/null 2>&1; then
+              printf '%s %s is already on crates.io; skipping.\n' "$crate" "$VERSION"
+              continue
+            fi
+            printf 'Publishing %s %s\n' "$crate" "$VERSION"
+            cargo publish --locked --package "$crate"
+            # crates.io needs a moment to index a new version before a
+            # dependent crate can resolve it.
+            for _ in $(seq 1 60); do
+              if curl --silent --show-error --fail \
+                  --user-agent "tuishot-release (+https://github.com/junhoyeo/tuishot)" \
+                  "https://crates.io/api/v1/crates/$crate/$VERSION" > /dev/null 2>&1; then
+                printf '%s %s is indexed.\n' "$crate" "$VERSION"
+                break
+              fi
+              sleep 5
+            done
+          done

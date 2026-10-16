@@ -9,6 +9,7 @@
   "scripts": {
     "sync:packages": "node npm/scripts/sync-packages.mjs",
     "check:packages": "node npm/scripts/sync-packages.mjs --check",
+    "check:release": "node npm/scripts/check-release-manifest.mjs",
     "build:npm": "npm run build --workspace @tuishot/cli",
     "typecheck:npm": "npm run typecheck --workspace @tuishot/cli",
     "test:npm": "npm run test --workspace @tuishot/cli",
